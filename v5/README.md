@@ -14,3 +14,6 @@ La théorie propose 15 questions par parcours (5 dangers/protections, 5 zones/di
 - Source de cadrage : INRS ED 6127 sections 5.4 et 7.2, article R. 4544-10 du Code du travail. Les seuils de sécurité internes peuvent être plus stricts (questions critiques).
 
 Anciennes versions inchangées.
+
+## V5.1 — Signature manuscrite
+Après relecture du dossier, le formateur trace puis valide sa signature à la souris, au doigt ou au stylet. Signature du formateur obligatoire pour générer le PDF, signature de l'apprenti facultative. Date locale et signatures intégrées sur une page de visa avant l'annexe. Toute modification du dossier invalide la relecture et les signatures. Signature manuscrite numérisée, non certifiée ; aucune authentification forte ni horodatage de confiance. Les signatures ne sont pas stockées en ligne.
