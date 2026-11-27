@@ -84,7 +84,7 @@ async function pdfBuilder(title,subtitle,reference){
  neutral:{fg:muted,bg:rgb(.94,.96,.97)},good:{fg:rgb(.07,.37,.25),bg:rgb(.89,.96,.92)},info:{fg:rgb(.10,.33,.52),bg:rgb(.90,.94,.98)},
  warn:{fg:rgb(.54,.34,.02),bg:rgb(1,.95,.84)},bad:{fg:rgb(.62,.13,.20),bg:rgb(.99,.90,.91)}
  };
- let page,y,pageNumber=0;const W=595.28,H=841.89,M=42,usable=W-M*2;
+ let page,y,pageNumber=0;const ownedPages=[];const W=595.28,H=841.89,M=42,usable=W-M*2;
  function wrap(txt,f,size,max){
   const lines=[];
   for(const para of normalizePDF(txt).split("\n")){
@@ -97,11 +97,11 @@ async function pdfBuilder(title,subtitle,reference){
  function draw(txt,x,top,size=10,f=font,color=ink){page.drawText(normalizePDF(txt),{x,y:top-size,size,font:f,color})}
  function rule(top){page.drawRectangle({x:M,y:top,width:usable,height:.7,color:line})}
  function newPage(){
-  page=doc.addPage([W,H]);pageNumber++;page.drawRectangle({x:0,y:H-104,width:W,height:104,color:ink});page.drawRectangle({x:0,y:H-104,width:7,height:104,color:rgb(.26,.77,.75)});
+  page=doc.addPage([W,H]);ownedPages.push(page);pageNumber++;page.drawRectangle({x:0,y:H-104,width:W,height:104,color:ink});page.drawRectangle({x:0,y:H-104,width:7,height:104,color:rgb(.26,.77,.75)});
   draw("BLACKOUT  /  HABILITATION ELECTRIQUE",M,H-19,9,bold,rgb(.41,.88,.85));
   let t=H-38;for(const l of wrap(title,bold,17,usable)){draw(l,M,t,17,bold,white);t-=20}
   for(const l of wrap(subtitle,font,8.5,usable).slice(0,2)){draw(l,M,t-2,8.5,font,rgb(.81,.90,.94));t-=11}
-  rule(37);draw("DOSSIER V6.1  |  "+String(reference).slice(0,55),M,28,7.5,font,muted);draw("Evaluation - "+pageNumber,W-M-68,28,7.5,font,muted);y=H-124
+  rule(37);draw("DOSSIER V6.1  |  "+String(reference).slice(0,55),M,28,7.5,font,muted);y=H-124
  }
  function ensure(h){if(y-h<51)newPage()}
  function text(txt,{size=10,weight=false,color=ink,indent=0,gap=6}={}){
@@ -120,9 +120,17 @@ async function pdfBuilder(title,subtitle,reference){
  }
  function metrics(items){
   if(!items.length)return;const n=items.length,gap=8,w=(usable-gap*(n-1))/n,h=62;ensure(h+14);
-  items.forEach((a,i)=>{const c=palette[a.tone]||palette.neutral,x=M+i*(w+gap);page.drawRectangle({x,y:y-h,width:w,height:h,color:c.bg});page.drawRectangle({x,y:y-h,width:3,height:h,color:c.fg});draw(a.value,x+10,y-9,20,bold,c.fg);const ls=wrap(a.label,font,8,w-20);ls.slice(0,2).forEach((l,j)=>draw(l,x+10,y-35-j*10,8,font,muted))});y-=h+12
+  items.forEach((a,i)=>{const c=palette[a.tone]||palette.neutral,x=M+i*(w+gap);page.drawRectangle({x,y:y-h,width:w,height:h,color:c.bg});page.drawRectangle({x,y:y-h,width:3,height:h,color:c.fg});const value=String(a.value),sz=Math.min(20,(w-20)/Math.max(1,bold.widthOfTextAtSize(normalizePDF(value),1)));draw(value,x+10,y-9,sz,bold,c.fg);const ls=wrap(a.label,font,8,w-20);ls.slice(0,2).forEach((l,j)=>draw(l,x+10,y-35-j*10,8,font,muted))});y-=h+12
  }
  // Row backgrounds communicate the result; long cells split safely, with repeated headers.
+ function gradeBar(counts){
+  const keys=["A","B","C","D","unseen"],tones=["good","info","warn","bad","neutral"],total=keys.reduce((n,k)=>n+(counts[k]||0),0);
+  if(!total)return;ensure(45);let x=M;keys.forEach((k,i)=>{const n=counts[k]||0;if(n){const w=usable*n/total;page.drawRectangle({x,y:y-12,width:w,height:12,color:palette[tones[i]].fg});x+=w}});
+  y-=21;text(keys.map(k=>(k==="unseen"?"Non renseignés":k)+" : "+(counts[k]||0)).join("   |   "),{size:9,gap:9});
+ }
+ function numberPages(){
+  const pages=doc.getPages();for(const p of ownedPages){const n=pages.indexOf(p);if(n<0)continue;const label="Page "+(n+1)+" / "+pages.length;p.drawText(label,{x:W-M-font.widthOfTextAtSize(label,7.5),y:20.5,font,size:7.5,color:muted})}
+ }
  function table(headers,fractions,rows){
   const widths=fractions.map(f=>usable*f),xs=widths.map((_,i)=>M+widths.slice(0,i).reduce((a,b)=>a+b,0)),size=9,lead=12,pad=7;
   function head(){const lines=headers.map((h,i)=>wrap(h,bold,8.2,widths[i]-2*pad)),h=Math.max(...lines.map(l=>l.length))*11+12;ensure(h+35);page.drawRectangle({x:M,y:y-h,width:usable,height:h,color:ink});lines.forEach((ls,i)=>ls.forEach((l,k)=>draw(l,xs[i]+pad,y-6-k*11,8.2,bold,white)));y-=h}
@@ -142,7 +150,7 @@ async function pdfBuilder(title,subtitle,reference){
  async function signature(label,name,signed){
   ensure(145);section(label);text(name,{size:10,gap:2});const at=signed?new Date(signed.at).toLocaleString("fr-FR",{dateStyle:"short",timeStyle:"short",timeZone:"Europe/Paris"}):"Non signée";text(signed?"Signature tracée le "+at+" (heure de Paris)":"Signature facultative non renseignée",{size:9,color:muted,gap:3});ensure(80);page.drawRectangle({x:M,y:y-66,width:usable,height:66,borderColor:line,borderWidth:.8});if(signed){const image=await doc.embedPng(signed.png),scale=Math.min((usable-20)/image.width,52/image.height),w=image.width*scale,h=image.height*scale;page.drawImage(image,{x:M+10,y:y-33-h/2,width:w,height:h})}y-=78
  }
- newPage();return {doc,text,heading,section,space,signature,newPage,metrics,callout,table};
+ newPage();return {doc,text,heading,section,space,signature,newPage,metrics,callout,table,gradeBar,numberPages};
 }
 
 function download(bytes,name){const blob=new Blob([bytes],{type:"application/pdf"}),url=URL.createObjectURL(blob),link=document.createElement("a");link.href=url;link.download=name;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),10000)}
@@ -156,7 +164,7 @@ function save(){try{if(S)sessionStorage.setItem(KEY,JSON.stringify(S));else sess
 function restore(){try{let o=JSON.parse(sessionStorage.getItem(KEY)||"null");if(o&&o.version===VERSION&&o.identity&&Array.isArray(o.profiles)&&o.profiles.length&&o.profiles.every(p=>P[p])&&o.results)S=o}catch{}}
 function theoryLanding(){
  A.innerHTML=hero("Espace apprenti / 01","Évaluation théorique","Renseignez votre identité, choisissez les habilitations demandées par votre formateur, puis téléchargez votre résultat en un seul PDF.")+
- '<form id="startForm"><section class="panel"><div class="eyebrow">01 / Identification</div><h2>Votre identité</h2><div class="grid fields">'+field("nom","Nom","","text",true)+field("prenom","Prénom","","text",true)+field("groupe","Classe / groupe","","text",true)+field("entreprise","Entreprise (ou Sans entreprise)","","text",true)+field("lieu","Lieu de formation (centre / ville)","","text",true)+field("organisme","Organisme de formation","PROMEO","text",true)+field("dateTheorie","Date de l’évaluation théorique",today(),"date",true)+'</div><p class="fine" style="margin-top:12px">Ces renseignements seront inclus dans votre PDF et prérempliront le dossier du formateur. Vérifiez-les avant de commencer.</p></section><section class="panel"><div class="eyebrow">02 / Parcours</div><h2>Symboles à évaluer</h2><p class="muted">15 questions par parcours : 5 dangers/protections, 5 zones/distances, 5 limites. 20 minutes par parcours.</p>'+profilePicker([])+'</section><section class="panel"><h2>Consignes</h2><p>'+E(ruleText())+'</p><p>Plusieurs réponses peuvent être justes. Les questions non renseignées comptent comme incorrectes. Le chronomètre continue lors d’une actualisation. La sauvegarde est limitée à cet onglet : ne le fermez pas avant d’avoir téléchargé votre PDF.</p><div class="notice">'+E(pilot)+'</div><label class="checkline"><input type="checkbox" id="agree" required>Je confirme que j’ai sélectionné les symboles demandés et que je réaliserai le test selon les consignes du formateur.</label><p class="error" id="error" role="alert"></p><button class="primary" type="submit">Accéder à mon parcours →</button></section></form>'+footer();
+ '<form id="startForm"><section class="panel v61-student-intro"><div class="eyebrow">01 / Identification</div><div class="v61-form-columns"><div><h2>Votre identité</h2><p class="fine">Vérifiez votre nom et votre promotion.</p><div class="grid fields">'+field("nom","Nom","","text",true)+field("prenom","Prénom","","text",true)+field("groupe","Classe / groupe","","text",true)+'</div></div><div><h2>Votre formation</h2><p class="fine">Ces informations seront récupérées par le formateur.</p><div class="grid fields">'+field("entreprise","Entreprise (ou Sans entreprise)","","text",true)+field("lieu","Lieu de formation (centre / ville)","","text",true)+field("organisme","Organisme de formation","PROMEO","text",true)+field("dateTheorie","Date de l’évaluation théorique",today(),"date",true)+'</div></div></div><p class="fine" style="margin-top:12px">Ces renseignements seront inclus dans votre PDF et prérempliront le dossier du formateur. Vérifiez-les avant de commencer.</p></section><section class="panel"><div class="eyebrow">02 / Parcours</div><h2>Symboles à évaluer</h2><p class="muted">15 questions par parcours : 5 dangers/protections, 5 zones/distances, 5 limites. 20 minutes par parcours.</p>'+profilePicker([])+'</section><section class="panel"><h2>Consignes</h2><p>'+E(ruleText())+'</p><p>Plusieurs réponses peuvent être justes. Les questions non renseignées comptent comme incorrectes. Le chronomètre continue lors d’une actualisation. La sauvegarde est limitée à cet onglet : ne le fermez pas avant d’avoir téléchargé votre PDF.</p><div class="notice">'+E(pilot)+'</div><label class="checkline"><input type="checkbox" id="agree" required>Je confirme que j’ai sélectionné les symboles demandés et que je réaliserai le test selon les consignes du formateur.</label><p class="error" id="error" role="alert"></p><button class="primary" type="submit">Accéder à mon parcours →</button></section></form>'+footer();
  $("startForm").onsubmit=e=>{e.preventDefault();const raw=Object.fromEntries(STUDENT_FIELDS.map(k=>[k,$(k).value.trim()])),profiles=chosen();if(!profiles.length)return showError("Sélectionnez au moins un symbole.");if(Object.values(raw).some(s=>!s))return showError("Renseignez tous les champs d’identification et de formation.");let identity;try{identity=studentIdentity(raw)}catch(err){return showError(err.message)}S={version:VERSION,id:"HAB-"+(crypto.randomUUID?crypto.randomUUID():Math.random().toString(36).slice(2)+Date.now()).slice(0,12).toUpperCase(),date:new Date().toISOString(),identity,profiles,results:{},exam:null};save();renderTheory()};
 }
 function theoryDashboard(){
@@ -172,10 +180,10 @@ function theoryDashboard(){
 function examScreen(){
  const ex=S.exam;if(Date.now()>=ex.end){finishExam(true);return}
  const id=ex.ids[ex.index],q=Q[id];if(!q){S.exam=null;save();renderTheory();return}
- const selected=ex.answers[id]||[],count=ex.ids.filter(x=>ex.answers[x]?.length).length;
+ const selected=ex.answers[id]||[],count=ex.ids.filter(x=>ex.answers[x]?.length).length;ex.visited??={};if(!ex.visited[id]){ex.visited[id]=true;save()}
  if(!ex.orders[id]){ex.orders[id]=shuffle(q.options.map((_,i)=>i));save()}
- A.innerHTML='<div class="row"><div><div class="eyebrow">Épreuve en cours / '+E(get(ex.id))+'</div><h1>Question '+(ex.index+1)+' sur 15</h1></div><div class="exam-progress"><div class="metric small">'+count+' / 15</div><small>réponses saisies</small></div></div><div class="progress"><i style="width:'+count/15*100+'%"></i></div><div class="examgrid" style="margin-top:18px"><section class="panel"><div class="eyebrow">'+E(themes[q.theme])+'</div>'+(q.critical?'<div class="notice">Question critique de sécurité : une erreur bloque la réussite de cette épreuve.</div>':'')+'<h2>'+E(q.question)+'</h2><p class="muted">Cochez toutes les réponses que vous considérez exactes.</p>'+ex.orders[id].map(i=>'<label class="option"><input type="checkbox" data-opt="'+i+'" '+(selected.includes(i)?"checked":"")+'><span>'+E(q.options[i].text)+'</span></label>').join("")+'<div class="row" style="margin-top:18px"><button id="prev" '+(ex.index===0?"disabled":"")+'>← Précédente</button><button id="next" class="primary" '+(ex.index===14?"disabled":"")+'>Suivante →</button></div></section><aside class="panel"><h3>Questions</h3><div class="nav">'+ex.ids.map((q,i)=>'<button data-nav="'+i+'" class="'+(ex.answers[q]?.length?"done ":"")+(i===ex.index?"current":"")+'">'+(i+1)+'</button>').join("")+'</div><p class="fine" style="margin-top:12px">Vert : une réponse enregistrée.</p><p class="fine">'+(theorySaved?"✓ Sauvegardé dans cet onglet":"⚠ Sauvegarde indisponible : ne quittez pas la page") +'</p><button id="finish" class="primary" style="width:100%">Terminer l’épreuve</button></aside></div>'+footer();
- A.querySelectorAll("[data-opt]").forEach(el=>el.onchange=()=>{ex.answers[id]=[...A.querySelectorAll("[data-opt]:checked")].map(i=>Number(i.dataset.opt));save();examScreen()});
+ A.innerHTML='<div class="row v61-exam-heading"><div><div class="eyebrow">Épreuve en cours / '+E(get(ex.id))+'</div><h1>Question '+(ex.index+1)+' sur 15</h1></div><div class="exam-progress"><div class="metric small">'+count+' / 15</div><small>réponses saisies</small></div></div><div class="progress"><i style="width:'+count/15*100+'%"></i></div><div class="examgrid" style="margin-top:18px"><section class="panel"><div class="eyebrow">'+E(themes[q.theme])+'</div>'+(q.critical?'<div class="notice">Question critique de sécurité : une erreur bloque la réussite de cette épreuve.</div>':'')+'<h2>'+E(q.question)+'</h2><p class="muted">Cochez toutes les réponses que vous considérez exactes.</p>'+ex.orders[id].map(i=>'<label class="option"><input type="checkbox" data-opt="'+i+'" '+(selected.includes(i)?"checked":"")+'><span>'+E(q.options[i].text)+'</span></label>').join("")+'<div class="row" style="margin-top:18px"><button id="prev" '+(ex.index===0?"disabled":"")+'>← Précédente</button><button id="next" class="primary" '+(ex.index===14?"disabled":"")+'>Suivante →</button></div></section><aside class="panel"><h3>Questions</h3><div class="nav">'+ex.ids.map((q,i)=>'<button data-nav="'+i+'" class="'+(ex.answers[q]?.length?"done ":ex.visited[q]?"visited ":"")+(i===ex.index?"current":"")+'">'+(i+1)+'</button>').join("")+'</div><p class="fine" style="margin-top:12px">Vert : réponse saisie. Bleu : question consultée. Gris : non consultée.</p><p class="fine">'+(theorySaved?"✓ Sauvegardé dans cet onglet":"⚠ Sauvegarde indisponible : ne quittez pas la page") +'</p><button id="finish" class="primary" style="width:100%">Terminer l’épreuve</button></aside></div>'+footer();
+ A.querySelectorAll("[data-opt]").forEach(el=>el.onchange=()=>{const focus=el.dataset.opt;ex.answers[id]=[...A.querySelectorAll("[data-opt]:checked")].map(i=>Number(i.dataset.opt));save();examScreen();A.querySelector('[data-opt="'+focus+'"]')?.focus({preventScroll:true})});
  const navigate=n=>{ex.index=n;save();examScreen();window.scrollTo({top:0,behavior:"instant"})};
  A.querySelectorAll("[data-nav]").forEach(b=>b.setAttribute("aria-label","Question "+(Number(b.dataset.nav)+1)+(ex.answers[ex.ids[Number(b.dataset.nav)]]?.length?" — répondue":" — non répondue")));A.querySelectorAll("[data-nav].current").forEach(b=>b.setAttribute("aria-current","step"));
  $("prev").onclick=()=>navigate(ex.index-1);$("next").onclick=()=>navigate(ex.index+1);A.querySelectorAll("[data-nav]").forEach(b=>b.onclick=()=>navigate(Number(b.dataset.nav)));
@@ -185,22 +193,29 @@ function examScreen(){
 function finishExam(expired){if(!S?.exam)return;const ex=S.exam;S.results[ex.id]={ids:ex.ids,answers:ex.answers,seconds:expired?P[ex.id].minutes*60:Math.max(0,Math.round((Date.now()-ex.start)/1000))};S.exam=null;save();renderTheory();if(expired)alert("Temps écoulé : l’épreuve a été corrigée avec les réponses enregistrées.")}
 function updateClock(){const h=$("headRight");if(!S?.exam){h.className="badge";h.textContent="APPRENTI";return}const remain=Math.max(0,Math.ceil((S.exam.end-Date.now())/1000));h.className="clock"+(remain<60?" danger":"");h.textContent=displayTime(remain);if(!remain)finishExam(true)}
 function renderTheory(){if(!S)theoryLanding();else if(S.exam)examScreen();else theoryDashboard();updateClock()}
+
 async function theoryPDF(){
  const packet={version:VERSION,id:S.id,date:S.date,identity:S.identity,profiles:S.profiles,results:S.results};
  const validated=validatePacket(packet),b=await pdfBuilder("Résultats de l'évaluation théorique","Formation préalable à l'habilitation électrique",S.id);
  b.doc.setTitle("Résultats théoriques - "+S.identity.nom+" "+S.identity.prenom);b.doc.setAuthor("BLACKOUT HABILITATION");b.doc.setSubject(encodePacket(packet));b.doc.setCreator("BLACKOUT HABILITATION V6");
- b.heading("01 / Identification");b.text(identityLine(S.identity),{weight:true,size:12});b.text("Entreprise : "+(S.identity.entreprise||"Non renseignée")+" | Organisme de formation : "+(S.identity.organisme||"Non renseigné"));b.text("Lieu de formation : "+(S.identity.lieu||"Non renseigné"));b.text("Date de théorie : "+dateFmt(S.identity.dateTheorie||S.date)+" | Référence : "+S.id);
- b.heading("02 / Résultats par symbole");for(const p of S.profiles){const r=validated.results[p];b.text(get(p)+"  |  "+r.good+"/"+r.total+" ("+r.pct+" %)  |  "+theoryLabel(r)+"  |  Temps "+displayTime(r.seconds)+"  |  Erreurs critiques : "+r.critical,{weight:true});b.text(Object.keys(themes).map(k=>themes[k]+" "+r.themes[k][0]+"/5").join("  |  "),{size:9,gap:8})}
+ b.heading("01 / Identification");b.text(identityLine(S.identity),{weight:true,size:15});
+ b.table(["Formation","Informations"],[.3,.7],[{cells:["Entreprise",S.identity.entreprise||"Non renseignée"]},{cells:["Organisme",S.identity.organisme||"Non renseigné"]},{cells:["Lieu",S.identity.lieu||"Non renseigné"]},{cells:["Date de théorie",dateFmt(S.identity.dateTheorie||S.date)]}]);
+ b.heading("02 / Résultats par symbole");const items=S.profiles.map(p=>validated.results[p]);
+ b.table(["Symbole","Score","Erreurs critiques","Résultat"],[.29,.24,.23,.24],items.map(r=>({cells:[get(r.id),r.good+"/"+r.total+" ("+r.pct+" %)",String(r.critical),theoryLabel(r)],tone:theoryTone(r),emphasis:3})));
  b.heading("03 / Conditions et limites");b.text(ruleText(),{size:9});b.text("Résultats produits localement, sans authentification cryptographique. Le formateur doit contrôler l'identité, les conditions du test et la cohérence des résultats. "+pilot,{size:9});
- for(const p of S.profiles){const r=validated.results[p];b.newPage();b.heading("Correction détaillée - "+get(p));b.text("Résultat : "+r.good+"/"+r.total+" ("+r.pct+" %) / "+theoryLabel(r),{weight:true});for(let i=0;i<r.detail.length;i++){const d=r.detail[i],q=Q[d.id];b.section((i+1)+". "+(d.ok?"Correct":"Incorrect")+(d.critical?" / critique":""));b.text(q.question,{weight:true,gap:3});b.text("Réponse donnée : "+(d.selected.map(k=>q.options[k].text).join(" ; ")||"Aucune"),{size:9,gap:3});b.text("Réponse attendue : "+d.correct.map(k=>q.options[k].text).join(" ; "),{size:9,gap:8});}}
- download(await b.doc.save(),"THEORIE_HABILITATION_"+safeName(S.identity.nom)+"_"+safeName(S.identity.prenom)+"_"+S.id+".pdf");
+ for(const p of S.profiles){const r=validated.results[p];b.newPage();b.heading("Correction détaillée - "+get(p));b.metrics([{value:r.good+"/"+r.total,label:"Bonnes réponses",tone:theoryTone(r)},{value:String(r.total-r.good),label:"Réponses incorrectes ou absentes",tone:r.good===r.total?"good":"warn"},{value:String(r.critical),label:"Erreurs critiques",tone:r.critical?"bad":"neutral"}]);b.callout("Résultat de l'épreuve",theoryLabel(r)+" | Temps : "+displayTime(r.seconds),theoryTone(r));
+ b.table(["Thème","Bonnes réponses","Incorrectes"],[.53,.24,.23],Object.keys(themes).map(k=>({cells:[themes[k],r.themes[k][0]+"/"+r.themes[k][1],String(r.themes[k][1]-r.themes[k][0])],tone:r.themes[k][0]===r.themes[k][1]?"good":"warn",emphasis:2})));
+ b.section("Réponses et corrections");b.table(["Question / résultat","Réponse donnée","Réponse attendue"],[.40,.30,.30],r.detail.map((d,i)=>{const q=Q[d.id];return {cells:[(i+1)+". "+(d.ok?"EXACTE":d.critical?"ERREUR CRITIQUE":"INCORRECTE")+"\n"+q.question,d.selected.map(k=>q.options[k].text).join(" ; ")||"Sans réponse",d.correct.map(k=>q.options[k].text).join(" ; ")],tone:d.ok?"good":d.critical?"bad":"warn",emphasis:0}}));
+ }
+ b.numberPages();download(await b.doc.save(),"THEORIE_HABILITATION_"+safeName(S.identity.nom)+"_"+safeName(S.identity.prenom)+"_"+S.id+".pdf");
 }
+
 let T={identity:{nom:"",prenom:"",groupe:"",entreprise:"",organisme:"PROMEO",lieu:"",formateur:"",fonction:"Formateur",dateTheorie:today(),datePratique:today(),dureeTheorie:"",dureePratique:"",stage:"Prévention du risque électrique",type:"Initiale",perimetre:"",titresDemandes:"",datesFormation:"",dureeFormation:""},file:null,source:null,importMessage:"",profiles:[],practice:{},external:{},verified:false,reviewed:false,scopeNotes:"",signatures:{trainer:null,learner:null}};
 
 function signatureSnapshot(){return JSON.stringify({identity:T.identity,profiles:T.profiles,practice:T.profiles.map(p=>[p,gridFor(p)]),external:T.external,verified:T.verified,scopeNotes:T.scopeNotes,source:T.source?.packet.id||null,file:T.file?[T.file.name,T.file.bytes.length,T.file.pages]:null})}
 function validSignature(role){const s=T.signatures[role];return T.reviewed&&s?.png?.startsWith("data:image/png;base64,")&&s.snapshot===signatureSnapshot()?s:null}
 function invalidateSignatureReview(){
- if(DEMO)clearQuickArtifacts();
+ if(DEMO)clearQuickArtifacts();v61ExportKey=null;
  T.reviewed=false;T.signatures={trainer:null,learner:null};
  const review=$("reviewed");if(review)review.checked=false;
  for(const role of ["trainer","learner"]){const canvas=$("signature-"+role);if(canvas?.resetPad)canvas.resetPad()}
@@ -366,7 +381,7 @@ function commentChoices(field){
   add("Aucune restriction complémentaire constatée","Aucune restriction complémentaire constatée dans le cadre des situations évaluées.");
  }else{
   if(z?.started)add("Bilan de la situation (notes réelles)","Bilan des indicateurs : "+z.counts.A+" A, "+z.counts.B+" B, "+z.counts.C+" C, "+z.counts.D+" D ; "+z.counts.unseen+" non renseigné(s)."+(z.failed?" Critères d’acceptation non satisfaits.":z.pass?" Critères d’acceptation satisfaits pour cette situation.":" Évaluation incomplète."));
-  if(s&&!z)add("Bilan pratique (résultats réels)",s.completedCount+" situation(s) entièrement évaluée(s) ; "+s.situations.filter(x=>x.pass).length+" satisfaisante(s). "+(s.failed?"Au moins une situation non réussie.":""));
+  if(s&&!z)add("Bilan pratique et théorique (calculé)",evidenceComment(p));
   if(s?.r&&s.r.critical!==null&&!z)add("Bilan théorique (résultat réel)","Résultat théorique : "+s.r.good+"/"+s.r.total+" ("+s.r.pct+" %), "+(s.r.passed?"critères de réussite satisfaits.":"critères de réussite non satisfaits."));
   if(field.id==="scopeNotes")add("Synthèse des évaluations (résultats réels)",T.profiles.map(id=>{const v=gridStatus(id);return get(id)+" : "+v.completedCount+" situation(s) entièrement évaluée(s), avis "+ops[gridFor(id).opinion].toLowerCase()}).join(" ; ")+".");
   add("Comportement adapté","Comportement adapté face aux risques électriques observés.");
@@ -447,7 +462,7 @@ function renderPractices(){
 function refreshPractice(p,el){const g=gridFor(p),s=gridStatus(p),op=el.querySelector("[data-opinion]");if(!s.possible&&g.opinion==="favorable")g.opinion="incomplet";op.querySelector('option[value="favorable"]').disabled=!s.possible;op.querySelector('option[value="favorable"]').textContent="Favorable";op.value=g.opinion;
  const count=el.querySelector("[data-count-status]");if(count)count.textContent=s.completedCount+" situation(s) entièrement évaluée(s) · "+s.startedCount+" commencée(s) · minimum indiqué dans la grille : "+s.referenceMinimum+". "+(s.completedCount<s.referenceMinimum?"Écart de nombre signalé dans le PDF, sans blocage supplémentaire.":"");
  const review=el.querySelector("[data-review-status]"),d=decisionReview(p);if(review){review.innerHTML=reviewBadge(p)+(d.closed&&d.negative?(d.stopped?'<p class="fine">Échec constaté : la clôture est défavorable, les autres éléments restent non évalués.</p>':'<p class="fine">L’évaluation est clôturée avec un avis défavorable, sans validation du symbole.</p>'):(d.blockers.length?'<p class="fine">'+E(d.blockers.join(" · "))+'</p>':""))}
- el.querySelectorAll("[data-situation]").forEach(box=>{const z=s.situations[Number(box.dataset.situation)];box.querySelector("[data-sit-badge]").innerHTML=situationBadge(z);box.querySelector("[data-sit-summary]").textContent=countText(z.counts)});
+ el.querySelectorAll("[data-situation]").forEach(box=>{const z=s.situations[Number(box.dataset.situation)];box.querySelector("[data-sit-badge]").innerHTML=situationBadge(z);box.querySelector("[data-sit-summary]").innerHTML=gradeChips(z.counts)+'<span class="fine">'+E(z.counts.A+z.counts.B+z.counts.C+z.counts.D)+"/"+E(z.counts.A+z.counts.B+z.counts.C+z.counts.D+z.counts.unseen)+' indicateurs renseignés</span>';box.querySelectorAll(".criterion").forEach((row,i)=>row.dataset.grade=g.situations[Number(box.dataset.situation)].criteria[i].mark||"empty")});
  el.querySelector("[data-summary]").innerHTML='<span>Situations satisfaites : <b>'+s.situations.filter(z=>z.pass).length+'/'+s.startedCount+'</b></span>'+practiceBadge(s)+(s.template&&!s.startedCount?status("Aucune situation évaluée","wait"):s.reduced?status("Nombre inférieur au minimum de la grille","wait"):"")+(s.practicePassed&&!s.positive?status("Théorie à contrôler","wait"):"");updateOverall()}
 
 
@@ -532,13 +547,15 @@ function reportSummary(b,items,draft){
 function reportConclusion(b,items,draft,fav){
  const t=evidenceTotals(items);
  b.newPage();b.heading("02 / Conclusion et points de vigilance");
- b.metrics(["A","B","C","D"].map(k=>({value:String(t[k]),label:k+" - "+marks[k],tone:gradeTone[k]})));
- b.callout("Réussites constatées",t.A+" indicateur(s) noté(s) A (sans erreur) et "+items.reduce((n,e)=>n+e.situations.filter(x=>x.z.pass).length,0)+" situation(s) satisfaisante(s). "+t.B+" écart(s) acceptable(s) B. Les détails figurent dans les grilles.", "good");
+ b.metrics(["A","B","C","D"].map(k=>({value:String(t[k]),label:k+" - "+marks[k],tone:gradeTone[k]})));b.gradeBar(t);
+ b.callout("Réussites constatées",t.A+" indicateur(s) noté(s) A (sans erreur) et "+items.reduce((n,e)=>n+e.situations.filter(x=>x.z.pass).length,0)+" situation(s) satisfaisante(s). "+t.B+" écart(s) acceptable(s) B. "+(t.theoryAvailable?t.good+" bonne(s) réponse(s) sur "+t.questions+" questions théoriques renseignées. ":"Résultats théoriques indisponibles. ")+"Les détails figurent dans les grilles.",t.A||t.good?"good":"neutral");
  b.callout("Erreurs et écarts significatifs",t.C+" erreur(s) majeure(s) C ; "+t.D+" erreur(s) grave(s) D ; "+t.failed+" situation(s) non réussie(s). "+t.critical+" erreur(s) théorique(s) critique(s) recensée(s)"+(t.criticalUnknown?" ; données critiques inconnues pour "+t.criticalUnknown+" symbole(s)":"")+".",t.D||t.failed||t.critical?"bad":t.C?"warn":"neutral");
  const deviations=items.filter(e=>e.s.template&&e.s.completedCount<e.s.referenceMinimum);
  if(deviations.length)b.callout("Nombre de situations inférieur au minimum de référence",deviations.map(e=>e.name+" : "+e.s.completedCount+"/"+e.s.referenceMinimum).join(" ; ")+". La conformité à ce minimum n'est pas établie. L'avis est celui du formateur au vu des situations réalisées.","warn");
  const errors=items.flatMap(e=>e.entries.filter(x=>["C","D"].includes(x.mark)).map(x=>({cells:[e.name+" / S"+x.number,x.criterion,x.mark+" - "+marks[x.mark]+(x.note?"\n"+x.note:"")],tone:gradeTone[x.mark],emphasis:2})));
- b.section("Indicateurs nécessitant une attention particulière");b.table(["Symbole / situation","Indicateur observé","Erreur et observation"],[.20,.48,.32],errors);
+ b.section("Indicateurs nécessitant une attention particulière");if(errors.length)b.table(["Symbole / situation","Indicateur observé","Erreur et observation"],[.20,.48,.32],errors);else b.text(t.started?"Aucun indicateur C ou D enregistré dans les situations commencées.":"Aucune situation commencée : aucune conclusion pratique possible.",{size:9});
+ const wrong=items.filter(e=>e.r&&e.r.good<e.r.total).map(e=>({cells:[e.name,String(e.r.total-e.r.good),String(e.r.critical??"Inconnu"),e.hasTheoryDetail?"Voir les questions et corrections par symbole.":"Voir le PDF théorique d’origine."],tone:e.r.critical>0?"bad":"warn",emphasis:1}));
+ if(wrong.length){b.section("Erreurs théoriques");b.table(["Symbole","Incorrectes","Critiques","Détail"],[.23,.20,.18,.39],wrong)}
  b.section("Décision du formateur");b.text("Titre(s) demandé(s) par l'entreprise : "+(requestedTitles()||"Non renseigné"),{weight:true});
  b.text(draft?"Aucune proposition administrative émise.":"Avis favorables : "+(fav.map(get).join(" ; ")||"Aucun"),{weight:true});
  b.text("Avis défavorables"+(draft?" saisis":"")+" : "+(items.filter(e=>e.g.opinion==="defavorable").map(e=>e.name).join(" ; ")||"Aucun"));
@@ -560,17 +577,18 @@ function reportSymbol(b,e,draft){
  b.section("Pratique");if(!t){b.callout("Grille non fournie","Aucun avis favorable autorisé tant que la grille correspondante n'est pas disponible.","warn");return}
  b.text("Source : "+t.source+" - grille Word fournie. "+s.completedCount+" situation(s) entièrement évaluée(s), "+s.startedCount+" commencée(s). Minimum indiqué dans la grille : "+t.min+".",{weight:true});
  if(s.completedCount<t.min)b.callout("Écart au minimum de référence","Nombre inférieur au minimum indiqué dans la grille. L'avis du formateur porte sur les situations réalisées.","warn");
- b.metrics(["A","B","C","D"].map(k=>({value:String(s.counts[k]),label:k+" - "+marks[k],tone:gradeTone[k]})));
+ b.metrics(["A","B","C","D"].map(k=>({value:String(s.counts[k]),label:k+" - "+marks[k],tone:gradeTone[k]})));b.gradeBar(s.counts);
  b.table(["Situation","A / B / C / D","Bilan"],[.50,.25,.25],e.situations.map(({sit,z,number})=>({cells:[number+". "+(sit.title||"Intitulé non renseigné"),["A","B","C","D"].map(k=>k+" "+z.counts[k]).join("  ")+"\nNon renseignés : "+z.counts.unseen,situationResult(z)],tone:z.failed?"bad":z.pass?"good":"neutral",emphasis:2})));
  b.section("Objectifs des mises en situation");for(const objective of t.objectives)b.text("- "+objective,{size:9,gap:3});
  if(p==="BC")b.text("Note : l'objectif et l'indicateur relatifs à la consignation diffèrent dans le document source. Formulations conservées ; à vérifier avec le référent.",{size:9});
  for(const {sit,z,number} of e.situations){
  b.newPage();b.heading(name+" / Situation "+number);b.text(sit.title||"Intitulé non renseigné",{weight:true,size:15,gap:8});
- b.callout(situationResult(z),situationReportText(z),z.failed?"bad":z.pass?"good":"neutral");
+ b.callout(situationResult(z),situationReportText(z),z.failed?"bad":z.pass?"good":"neutral");b.gradeBar(z.counts);
  b.table(["Indicateur de la grille","Note / observation"],[.62,.38],sit.criteria.map((c,j)=>({cells:[(j+1)+". "+c.text,(c.mark?c.mark+" - "+marks[c.mark]:"Non renseigné")+(c.note?"\n"+c.note:"")],tone:gradeTone[c.mark]||"neutral",emphasis:1})));
- const positives=sit.criteria.filter(c=>c.mark==="A");const errors=sit.criteria.filter(c=>c.mark==="C"||c.mark==="D");
- if(positives.length)b.callout("Réussites observées (A)",positives.map(c=>"- "+c.text).join("\n"),"good");
- if(errors.length)b.callout("Erreurs majeures / graves",errors.map(c=>c.mark+" - "+c.text+(c.note?" : "+c.note:"")).join("\n"),errors.some(c=>c.mark==="D")?"bad":"warn");
+ const positives=sit.criteria.filter(c=>c.mark==="A"),errors=sit.criteria.filter(c=>c.mark==="C"||c.mark==="D"),acceptable=sit.criteria.filter(c=>c.mark==="B");
+ if(positives.length)b.callout("Réussites observées",positives.length+" indicateur(s) A : repérables en vert dans le tableau.", "good");
+ if(acceptable.length)b.text(acceptable.length+" écart(s) acceptable(s) B : repérables en bleu dans le tableau.",{size:9});
+ if(errors.length)b.callout("Erreurs à reprendre",errors.map(c=>c.mark+" - "+c.text+(c.note?" : "+c.note:"")).join("\n"),errors.some(c=>c.mark==="D")?"bad":"warn");
  b.text("Observations du formateur : "+(sit.observations||"Non renseignées"));
  }
  b.section("Bilan par symbole");b.text(practiceResult(s),{weight:true});b.text("Règle : "+PRACTICE_RULE+" Une situation commencée doit être renseignée pour un avis favorable. Le nombre réalisé est distinct du minimum indiqué dans la grille.",{size:9});b.text("Observations globales : "+(g.observations||"Non renseignées"));b.text("Restrictions / suites : "+(g.reserve||"Non renseignées"));
@@ -602,14 +620,15 @@ async function trainerPDF(onlyAvis=false,returnBytes=false,draft=false){
  b.newPage();b.heading(draft?"04 / Brouillon non signé":"04 / Signatures et validation de l'avis");b.text(identityLine(i),{weight:true,size:12});b.text("Référence du dossier : "+ref);if(draft){b.text("Aucun visa dans le PDF de contrôle. Les données et les résultats affichés sont provisoires. Les signatures éventuellement déjà saisies ne sont pas modifiées ni copiées.",{weight:true})}else{b.text("Avis favorables : "+(fav.map(get).join(" ; ")||"Aucun"));b.text("Le formateur confirme avoir relu le dossier et ses observations. La signature de l'apprenti, si présente, atteste uniquement sa prise de connaissance.",{size:10});await b.signature("Formateur / signataire de l'avis",i.formateur+" - "+i.fonction,trainerSigned);await b.signature("Apprenti / prise de connaissance (facultatif)",i.nom+" "+i.prenom,learnerSigned);b.text("Signatures manuscrites numérisées, sans certificat électronique ni horodatage de confiance. Le titre d'habilitation relève de l'employeur.",{size:9})}
  b.newPage();b.heading("05 / Annexe - évaluation théorique originale");b.table(["Symbole","Score","Erreurs critiques","Résultat"],[.31,.23,.24,.22],evidence.map(e=>({cells:[e.name,e.r?e.r.good+"/"+e.r.total+" ("+e.r.pct+" %)":"Non renseigné",e.r?String(e.r.critical??"Non renseignées"):"Non renseignées",e.r?theoryLabel(e.r):"Non renseigné"],tone:theoryTone(e.r),emphasis:3})));b.text(ruleText(),{size:9});b.text("Fichier joint : "+(T.file?.name||"Aucun PDF importé"),{weight:true});b.text("Nombre de pages annexées : "+(T.file?.pages||0));b.text("Source : "+(T.source?"PDF V5 reconnu, réponses recalculées localement":"PDF externe, résultats reportés manuellement"));b.text("Contrôle des conditions de réalisation par le formateur : "+(T.verified?"confirmé":"non confirmé"));b.text(T.file?"Le PDF importé est reproduit à la suite de cette page. Les métadonnées d'un fichier local ne constituent pas une preuve d'authenticité.":"Aucun résultat théorique original n'est annexé à ce brouillon.",{size:9});b.text("Références de cadrage : INRS ED 6127, sections 5.4 et 7.2 ; Code du travail, article R. 4544-10. Vérifier les référentiels et prescriptions applicables au contexte de formation.",{size:9});
  const {PDFDocument}=requirePdf();if(T.file){const original=await PDFDocument.load(T.file.bytes),pages=await b.doc.copyPages(original,original.getPageIndices());pages.forEach(p=>b.doc.addPage(p));}
- const avisPages=await b.doc.copyPages(avisDoc,avisDoc.getPageIndices());avisPages.forEach((p,i)=>b.doc.insertPage(avisInsertIndex+i,p));
+ const avisPages=await b.doc.copyPages(avisDoc,avisDoc.getPageIndices());avisPages.forEach((p,i)=>b.doc.insertPage(avisInsertIndex+i,p));b.numberPages();
  if(DEMO)await watermarkDemo(b.doc);if(draft)await watermarkControl(b.doc);
- const bytes=await b.doc.save(),name=(draft?"BROUILLON_CONTROLE_":DEMO?"DEMONSTRATION_":"")+"DOSSIER_HABILITATION_"+safeName(i.nom)+"_"+safeName(i.prenom)+"_"+ref+".pdf";if(returnBytes)return {bytes,name};download(bytes,name);
+ const bytes=await b.doc.save(),name=(draft?"BROUILLON_CONTROLE_":DEMO?"DEMONSTRATION_":"")+"DOSSIER_HABILITATION_"+safeName(i.nom)+"_"+safeName(i.prenom)+"_"+ref+".pdf";if(returnBytes)return {bytes,name};download(bytes,name);if(!draft){v61ExportKey=exportKey();refreshWorkspace()}
 }
 
 /* V6 : navigation et ergonomie, sans changement des grilles ni des barèmes. */
 let v6Stage="theory",v6Profile=null,v6Situation={},v6Undo=null;
-const stages=[["identity","Identité & périmètre"],["theory","Théorie"],["practice","Pratique"],["final","Avis & PDF"]];
+const stages=[["identity","Identité"],["theory","Théorie"],["practice","Pratique"],["final","Avis & signatures"],["pdf","PDF"]];let v61ExportKey=null;
+function exportKey(){const a=validSignature("trainer"),b=validSignature("learner");return a?signatureSnapshot()+"|"+a.at+"|"+(b?.at||""):null}
 const requiredIdentity=["nom","prenom","groupe","entreprise","organisme","lieu","formateur","fonction","dateTheorie","datePratique","dureeTheorie","dureePratique","stage"];
 function element(tag,cls,html=""){const e=document.createElement(tag);e.className=cls;e.innerHTML=html;return e}
 
@@ -631,27 +650,60 @@ function setStage(stage,scroll=true){
  if(scroll)window.scrollTo({top:0,behavior:"smooth"});
  refreshWorkspace();refreshPracticeTabs();
 }
+
+function gradeChips(c){return '<div class="v61-gradechips">'+["A","B","C","D","unseen"].map(k=>'<span class="v61-grade grade-'+(k==="unseen"?"empty":k)+'" title="'+E(k==="unseen"?"Non renseigné":marks[k])+'"><b>'+(k==="unseen"?"—":k)+'</b> '+(c[k]||0)+'</span>').join("")+'</div>'}
+function refreshV61Dashboard(missing,completed){
+ const items=evaluationEvidence(),t=evidenceTotals(items),metrics=$("v61Metrics"),symbols=$("v61Symbols"),exp=$("v61ExportSummary"),ready=$("v61ExportReadiness");
+ if(symbols)symbols.innerHTML=T.profiles.map(p=>'<span>'+E(get(p))+'</span>').join("");
+ if(metrics){const tiles=[
+ ["Théorie",t.theoryAvailable?t.good+"/"+t.questions:"—",t.theoryAvailable+"/"+items.length+" parcours renseigné(s)",t.theoryAvailable&&items.every(e=>e.r?.passed)?"good":items.some(e=>e.r&&!e.r.passed)?"bad":"neutral"],
+ ["Pratique",String(t.completed),t.started+" situation(s) commencée(s)",t.failed?"bad":t.completed?"good":"neutral"],
+ ["Erreurs majeures",String(t.C),"Notes C",t.C?"warn":"neutral"],["Erreurs graves",String(t.D),"Notes D",t.D?"bad":"neutral"],
+ ["Dossier",completed.pdf?"PDF généré":completed.final?"Prêt":missing.length?"À compléter":"À signer",missing.length?missing.length+" vérification(s) restante(s)":completed.final?"Avis et visa renseignés":"Relecture du formateur",completed.final?"good":"neutral"]
+ ];metrics.innerHTML=tiles.map(([label,value,detail,tone])=>'<div class="v61-metric tone-'+tone+'"><small>'+E(label)+'</small><strong>'+E(value)+'</strong><span>'+E(detail)+'</span></div>').join("")}
+ if(exp)exp.innerHTML=items.length?'<div class="scroll"><table class="v61-review-table"><thead><tr><th>Symbole</th><th>Théorie</th><th>Situations</th><th>Décision</th></tr></thead><tbody>'+items.map(e=>'<tr><td><b>'+E(e.name)+'</b></td><td>'+(e.r?E(e.r.good+"/"+e.r.total+" · "+e.r.pct+" %"):"—")+'</td><td>'+e.s.completedCount+' évaluée(s) '+gradeChips(e.s.counts)+'</td><td>'+reviewBadge(e.p)+'</td></tr>').join("")+'</tbody></table></div>':'<p class="fine">Sélectionnez les symboles à évaluer.</p>';
+ if(ready){ready.textContent=completed.pdf?"Le dossier complet a été généré pour les données actuellement affichées.":completed.final?"Dossier prêt à exporter.":missing.length?missing.length+" vérification(s) restante(s). Utilisez la liste de suivi ou générez un aperçu non signé.":"Il reste à relire et signer le dossier."}
+}
+async function previewFullReport(){
+ if(DEMO){await previewAvis();return}
+ const before=A.inert;A.inert=true;let record;try{record=await trainerPDF(false,true,true)}finally{A.inert=before}
+ const url=URL.createObjectURL(new Blob([record.bytes],{type:"application/pdf"})),dialog=element("dialog","v6-pdf-dialog",'<div class="row"><div><h2>Aperçu du dossier complet</h2><p class="fine">BROUILLON NON SIGNÉ — ne pas transmettre</p></div><button type="button" class="secondary" data-close>Fermer</button></div><iframe title="Aperçu du dossier complet"></iframe><div class="toolbar"><button type="button" class="secondary" data-download>Télécharger ce brouillon</button><a target="_blank" rel="noopener" data-open>Ouvrir dans un nouvel onglet</a></div>');
+ document.body.append(dialog);dialog.querySelector("iframe").src=url;dialog.querySelector("[data-open]").href=url;dialog.querySelector("[data-download]").onclick=()=>download(record.bytes,record.name);dialog.querySelector("[data-close]").onclick=()=>dialog.close();dialog.addEventListener("close",()=>{dialog.remove();URL.revokeObjectURL(url)},{once:true});dialog.showModal();
+}
+function duplicateSituation(p,i){
+ const g=gridFor(p),source=g.situations[i];if(!source||g.situations.length>=12)return false;
+ const next=newSituation(p);next.title=source.title?source.title+" (nouvelle situation)":"";
+ g.situations.splice(i+1,0,next);g.opinion="incomplet";v6Situation[p]=i+1;invalidateSignatureReview();return true
+}
+
 function mountWorkspace(){
  const root=A;const direct=[...root.children];const hero=direct.find(n=>n.classList.contains("hero")),sections=direct.filter(n=>n.tagName==="SECTION"),area=$("practiceArea"),foot=direct.find(n=>n.tagName==="FOOTER");
  if(sections.length!==4||!area)return;
  const [theory,identity,scope,final]=sections;
- const banner=element("div","v6-dossier",'<div><div class="eyebrow">Dossier individuel</div><h2 id="v6Name">Nouveau dossier</h2><p class="muted" id="v6Identity"></p></div><div class="v6-progressbox"><div class="row"><span>Avancement des étapes</span><b id="v6Percent">0/4</b></div><div class="progress" aria-hidden="true"><i id="v6Progress"></i></div><small id="v6DraftState" role="status">Brouillon en mémoire de l’onglet</small></div>');
+ const oldActions=final.querySelector(".sticky-summary");oldActions.classList.remove("sticky-summary","row");oldActions.classList.add("v61-actionbar");
+ const reset=$("resetTrainer");if(reset)reset.hidden=true;
+ const exportPanel=element("section","panel v61-export-panel",'<div class="eyebrow">05 / Documents</div><h2>Exporter le dossier</h2><p class="muted">L’avis PROMEO seul est destiné à la transmission. Le dossier complet rassemble la synthèse, le modèle PROMEO, les grilles colorées et la théorie en annexe.</p><div id="v61ExportSummary"></div><div id="v61ExportReadiness" class="info" role="status"></div><div class="toolbar"><button type="button" class="secondary" id="v61FullPreview">Aperçu du dossier complet</button><button type="button" class="secondary" id="v61AvisPreview">Aperçu de l’avis</button>'+(DEMO?'':'<button type="button" class="secondary" id="v61ControlFile">Télécharger le brouillon de contrôle</button>')+'</div><p class="fine" style="margin-top:12px">Les aperçus de contrôle sont non signés et ne remplacent pas le PDF définitif. Les deux exports définitifs sont accessibles dans la barre d’actions.</p>');
+ 
+ const banner=element("div","v6-dossier",'<div class="v61-dossier-top"><div><div class="eyebrow">Dossier individuel</div><h2 id="v6Name">Nouveau dossier</h2><p class="muted" id="v6Identity"></p><div id="v61Symbols" class="v61-symbols"></div></div><div class="v6-progressbox"><div class="row"><span>Avancement des étapes</span><b id="v6Percent">0/5</b></div><div class="progress" aria-hidden="true"><i id="v6Progress"></i></div><small id="v6DraftState" role="status">Brouillon en mémoire de l’onglet</small></div></div><div id="v61Metrics" class="v61-metrics"></div>');
  root.insertBefore(banner,hero.nextSibling);
  const nav=element("nav","v6-steps",stages.map(([id,label],i)=>'<button type="button" data-stage-link="'+id+'"><span class="v6-stepno">'+(i+1)+'</span><span><b>'+label+'</b><small data-step-state="'+id+'">À compléter</small></span></button>').join(""));nav.setAttribute("aria-label","Étapes du dossier");banner.after(nav);
  const error=$("error");if(error){error.classList.add("v6-error");nav.after(error)}
- if(!DEMO){const controls=element("section","v6-control-bar",'<div><b>Contrôle PDF du dossier en cours</b><small>Possible même avec une seule situation ou des champs manquants. Brouillon non signé, sans valeur administrative.</small></div><div class="toolbar"><button type="button" id="v6ControlPreview" class="secondary">Aperçu de contrôle</button><button type="button" id="v6ControlDownload" class="secondary">Télécharger le dossier de contrôle</button></div>');(error||nav).after(controls);
- $("v6ControlPreview").onclick=()=>actionPDF($("v6ControlPreview"),previewAvis);
- $("v6ControlDownload").onclick=()=>actionPDF($("v6ControlDownload"),async()=>{const before=A.inert;A.inert=true;try{await trainerPDF(false,false,true)}finally{A.inert=before}});
- }
+ 
  const layout=element("div","v6-layout");root.insertBefore(layout,theory);
  const aside=element("aside","v6-sidebar",'<section class="panel"><h3>Suivi du dossier</h3><div id="v6SymbolSummary"></div><div id="v6Checklist"></div></section><section class="panel v6-draft"><h3>Brouillon local</h3><p class="fine">Sur ce navigateur uniquement. PDF et données nominatives restent sur ce poste. N’activez pas la sauvegarde sur un poste partagé. Les signatures ne sont jamais conservées.</p><button type="button" id="v6SaveDraft" class="secondary">Activer la sauvegarde locale</button><button type="button" id="v6RestoreDraft" class="secondary">Reprendre un brouillon</button><button type="button" id="v6EraseDraft" class="secondary">Effacer le brouillon enregistré</button><button type="button" id="v6NewDraft" class="secondary">Nouveau dossier</button></section>');
  const content=element("div","v6-content");layout.append(content,aside);
- for(const [id,nodes] of [["identity",[identity,scope]],["theory",[theory]],["practice",[area]],["final",[final]]]){
+ for(const [id,nodes] of [["identity",[identity,scope]],["theory",[theory]],["practice",[area]],["final",[final]],["pdf",[exportPanel]]]){
  const block=element("div","v6-stage");block.dataset.v6Stage=id;nodes.forEach(n=>block.append(n));
- const k=stages.findIndex(x=>x[0]===id),buttons=element("div","v6-stage-nav",'<span>'+(k>0?'<button type="button" class="secondary" data-stage-link="'+stages[k-1][0]+'">← '+stages[k-1][1]+'</button>':'')+'</span>'+(k<3?'<button type="button" class="primary" data-stage-link="'+stages[k+1][0]+'">'+stages[k+1][1]+' →</button>':''));
+ const k=stages.findIndex(x=>x[0]===id),buttons=element("div","v6-stage-nav",'<span>'+(k>0?'<button type="button" class="secondary" data-stage-link="'+stages[k-1][0]+'">← '+stages[k-1][1]+'</button>':'')+'</span>'+(k<stages.length-1?'<button type="button" class="primary" data-stage-link="'+stages[k+1][0]+'">'+stages[k+1][1]+' →</button>':''));
  block.append(buttons);content.append(block);
  }
- if(foot)root.append(foot);
+ if(foot)root.append(foot);root.append(oldActions);
+ const actions=oldActions.querySelector(".toolbar");if(!DEMO){const saveBtn=element("button","secondary","Enregistrer");saveBtn.type="button";saveBtn.id="v61Save";actions.prepend(saveBtn);saveBtn.onclick=()=>activateDraft()}
+ const previewBtn=element("button","secondary","Aperçu PDF");previewBtn.type="button";previewBtn.id="v61Preview";actions.prepend(previewBtn);previewBtn.onclick=()=>actionPDF(previewBtn,DEMO?previewAvis:previewFullReport);
+ $("v61FullPreview").onclick=()=>actionPDF($("v61FullPreview"),DEMO?previewAvis:previewFullReport);
+ $("v61AvisPreview").onclick=()=>actionPDF($("v61AvisPreview"),previewAvis);
+ if($("v61ControlFile"))$("v61ControlFile").onclick=()=>actionPDF($("v61ControlFile"),async()=>{const before=A.inert;A.inert=true;try{await trainerPDF(false,false,true)}finally{A.inert=before}});
+ $("generateAvis").textContent="Avis PROMEO";$("generate").textContent="Dossier complet";
  const reviewed=$("reviewed");if(reviewed){const controls=element("div","v6-previewbar",'<h3>Relire avant de signer</h3><p class="fine">Affiche le modèle PROMEO en brouillon non signé, même si le dossier est incomplet. Les décisions saisies sont indiquées dans les commentaires ; aucun avis officiel n’est émis.</p><button type="button" id="v6Preview" class="secondary">Prévisualiser l’avis PROMEO</button>');reviewed.closest("label").before(controls);$("v6Preview").onclick=()=>actionPDF($("v6Preview"),previewAvis)}
  root.querySelectorAll("[data-stage-link]").forEach(e=>e.onclick=()=>setStage(e.dataset.stageLink));
  $("v6SaveDraft").onclick=()=>activateDraft();
@@ -663,9 +715,9 @@ function mountWorkspace(){
 function refreshWorkspace(){
  if(!$("v6Name"))return;
  $("v6Name").textContent=[T.identity.nom,T.identity.prenom].filter(Boolean).join(" ")||"Nouveau dossier";
- $("v6Identity").textContent=[T.identity.groupe,T.identity.entreprise,T.profiles.map(get).join(" · ")].filter(Boolean).join(" / ")||"Aucun stagiaire identifié";
+ $("v6Identity").textContent=[T.identity.groupe,T.identity.entreprise,T.identity.lieu].filter(Boolean).join(" / ")||"Aucun stagiaire identifié";
  const missing=missingItems(),completed={identity:!missing.some(x=>x[0]==="identity"),theory:!missing.some(x=>x[0]==="theory"),practice:T.profiles.length>0&&!missing.some(x=>x[0]==="practice"),final:!missing.length&&!!validSignature("trainer")};
- const count=Object.values(completed).filter(Boolean).length;$("v6Percent").textContent=count+"/4";$("v6Progress").style.width=count*25+"%";
+ completed.pdf=completed.final&&!!v61ExportKey&&v61ExportKey===exportKey();const count=Object.values(completed).filter(Boolean).length;$("v6Percent").textContent=count+"/5";$("v6Progress").style.width=count*20+"%";refreshV61Dashboard(missing,completed);
  A.querySelectorAll("[data-step-state]").forEach(el=>{const id=el.dataset.stepState;const negative=id==="practice"&&completed[id]&&T.profiles.some(p=>decisionReview(p).negative),conditional=id==="practice"&&completed[id]&&T.profiles.some(p=>decisionReview(p).conditional);el.textContent=completed[id]?(negative?"Terminé · défavorable(s)":conditional?"Terminé · sous réserve":"Terminé"):id===v6Stage?"En cours":"À compléter";el.parentElement.parentElement.classList.toggle("step-done",completed[id]&&!negative&&!conditional);el.parentElement.parentElement.classList.toggle("step-negative",negative);el.parentElement.parentElement.classList.toggle("step-conditional",conditional)});
  $("v6SymbolSummary").innerHTML=T.profiles.length?T.profiles.map(p=>{const g=gridFor(p),s=gridStatus(p),d=decisionReview(p),done=s.situations.filter(z=>z.complete).length,total=Math.max(s.startedCount,1);return '<button type="button" class="symbol-summary" data-go-symbol="'+E(p)+'"><span><b>'+E(get(p))+'</b><small>'+done+'/'+total+' situations renseignées</small></span><span class="status '+(d.closed?(d.negative?"bad":d.conditional?"wait":"good"):"wait")+'">'+(d.closed?(d.negative?"Défavorable":d.conditional?"Sous réserve":"Terminé"):"À faire")+'</span></button><div class="progress mini"><i style="width:'+Math.min(100,done/total*100)+'%"></i></div>'}).join(""):'<p class="fine">Les symboles apparaîtront ici après sélection.</p>';
  $("v6SymbolSummary").querySelectorAll("[data-go-symbol]").forEach(b=>b.onclick=()=>{v6Profile=b.dataset.goSymbol;setStage("practice");refreshPracticeTabs()});
@@ -679,11 +731,12 @@ function mountPracticeTabs(){
  bar.querySelectorAll("[data-v6-profile]").forEach(b=>b.onclick=()=>{v6Profile=b.dataset.v6Profile;refreshPracticeTabs()});
  area.querySelectorAll("[data-profile]").forEach(el=>{const p=el.dataset.profile,g=gridFor(p),sits=[...el.querySelectorAll("[data-situation]")];if(!sits.length)return;
  v6Situation[p]=Math.max(0,Math.min(v6Situation[p]??0,sits.length-1));
- const tabs=element("div","v6-situationbar",'<div class="eyebrow">Mises en situation</div><div class="v6-tabs">'+sits.map((_,i)=>'<button type="button" data-v6-sit="'+i+'"><b>Situation '+(i+1)+'</b><small data-v6-sit-status>À faire</small></button>').join("")+'</div>');
+ const tabs=element("div","v6-situationbar",'<div class="eyebrow">Mises en situation</div><div class="v6-tabs v61-situation-cards">'+sits.map((_,i)=>'<button type="button" data-v6-sit="'+i+'"><span class="v61-card-top"><b>Situation '+(i+1)+'</b><small data-v6-sit-status>À faire</small></span><span class="v61-card-title"></span><span class="v61-card-counts"></span></button>').join("")+'</div>');
  sits[0].before(tabs);tabs.querySelectorAll("[data-v6-sit]").forEach(b=>b.onclick=()=>{v6Situation[p]=Number(b.dataset.v6Sit);refreshPracticeTabs()});
  for(const [i,box] of sits.entries()){
- const row=element("div","v6-sit-tools",'<p class="fine">Clavier : lorsque la notation d’un indicateur a le focus, utilisez A / B / C / D.</p><div class="toolbar"><button type="button" data-v6-reset="'+i+'" class="secondary">Réinitialiser les notes</button><button type="button" data-v6-next="'+i+'" class="primary">Situation suivante →</button></div>');box.append(row);
+ const row=element("div","v6-sit-tools",'<p class="fine">Clavier : lorsque la notation d’un indicateur a le focus, utilisez A / B / C / D.</p><div class="toolbar"><button type="button" data-v6-duplicate="'+i+'" class="secondary" title="Copie uniquement la trame et l’intitulé, jamais les notes">Dupliquer la trame</button><button type="button" data-v6-reset="'+i+'" class="secondary">Réinitialiser les notes</button><button type="button" data-v6-next="'+i+'" class="primary">Situation suivante →</button></div>');box.append(row);
  row.querySelector("[data-v6-next]").onclick=()=>{if(i+1<g.situations.length){v6Situation[p]=i+1;refreshPracticeTabs()}else{const next=T.profiles[T.profiles.indexOf(p)+1];if(next){v6Profile=next;refreshPracticeTabs()}else setStage("final")}};
+ row.querySelector("[data-v6-duplicate]").onclick=()=>{if(!confirm("Créer une nouvelle mise en situation à partir de cette trame ? Les notes et observations ne sont pas copiées."))return;if(duplicateSituation(p,i))renderPractices();else alert("12 situations maximum.")};
  row.querySelector("[data-v6-reset]").onclick=()=>{if(!confirm("Effacer les notes A/B/C/D de cette situation ? Les observations et l’intitulé restent conservés."))return;g.situations[i].criteria.forEach(c=>c.mark="");g.opinion="incomplet";invalidateSignatureReview();renderPractices()};
  box.querySelectorAll(".mark-buttons").forEach((m,j)=>m.addEventListener("keydown",e=>{if(e.ctrlKey||e.metaKey||e.altKey||!["A","B","C","D"].includes(e.key.toUpperCase()))return;const target=m.querySelector('input[value="'+e.key.toUpperCase()+'"]');if(!target)return;e.preventDefault();target.click();const next=box.querySelectorAll(".mark-buttons")[j+1]?.querySelector('input[type="radio"]');if(next)next.focus()}));
  }
@@ -696,7 +749,7 @@ function refreshPracticeTabs(){
  area.querySelectorAll("[data-v6-profile]").forEach(b=>{const p=b.dataset.v6Profile,s=gridStatus(p),active=p===v6Profile;b.classList.toggle("active",active);b.setAttribute("aria-pressed",String(active));const d=decisionReview(p);b.querySelector("small").textContent=d.closed?(d.negative?"Terminé · défavorable":d.conditional?"Terminé · sous réserve":"Terminé · favorable"):"À compléter"});
  area.querySelectorAll("[data-profile]").forEach(el=>{const p=el.dataset.profile,g=gridFor(p),s=gridStatus(p),active=p===v6Profile;el.hidden=!active;
  const idx=Math.max(0,Math.min(v6Situation[p]??0,g.situations.length-1));v6Situation[p]=idx;
- el.querySelectorAll("[data-v6-sit]").forEach(b=>{const i=Number(b.dataset.v6Sit),z=s.situations[i],on=i===idx;b.classList.toggle("active",on);b.setAttribute("aria-pressed",String(on));b.querySelector("small").textContent=z.failed?"Échec":z.pass?"Validée":z.complete?"Évaluée":"À faire"});
+ el.querySelectorAll("[data-v6-sit]").forEach(b=>{const i=Number(b.dataset.v6Sit),z=s.situations[i],on=i===idx;b.classList.toggle("active",on);b.setAttribute("aria-pressed",String(on));b.dataset.result=z.failed?"bad":z.pass?"good":z.started?"warn":"neutral";b.querySelector("small").textContent=z.failed?"Non réussie":z.pass?"Satisfaisante":z.started?"En cours":"À faire";b.querySelector(".v61-card-title").textContent=g.situations[i].title||"Intitulé à renseigner";b.querySelector(".v61-card-counts").innerHTML=gradeChips(z.counts)});
  el.querySelectorAll("[data-situation]").forEach(box=>{box.hidden=Number(box.dataset.situation)!==idx;const next=box.querySelector("[data-v6-next]");if(next)next.textContent=idx+1<g.situations.length?"Situation suivante →":T.profiles.indexOf(p)+1<T.profiles.length?"Habilitation suivante →":"Aller à l’avis →"});
  });
  const undo=$("v6UndoBar");if(undo){const valid=v6Undo&&T.practice[v6Undo.p]===v6Undo.grid&&T.profiles.includes(v6Undo.p)&&v6Undo.grid.situations.length<12;undo.innerHTML=valid?'<div class="info v6-undo"><span>Dernière suppression : '+E(get(v6Undo.p))+' · situation '+(v6Undo.index+1)+'</span><button type="button" class="secondary" id="undoSituation">Annuler la suppression</button></div>':'';
@@ -731,7 +784,7 @@ async function previewAvis(){
 }
 /* Opt-in local draft: one record, no signatures, no network. */
 let draftEnabled=false,draftTimer=null,draftSerial=Promise.resolve(),draftMessage="Brouillon en mémoire de l’onglet",draftDirty=false,draftRevision=0,leavingDraft=false;
-function draftLabel(){const e=$("v6DraftState");if(e)e.textContent=DEMO?"Simulation locale · aucun enregistrement permanent":draftMessage;const b=$("v6SaveDraft");if(b)b.textContent=draftEnabled?"Sauvegarder maintenant":"Activer la sauvegarde locale"}
+function draftLabel(){const e=$("v6DraftState");if(e)e.textContent=DEMO?"Simulation locale · aucun enregistrement permanent":draftMessage;const b=$("v6SaveDraft");if(b)b.textContent=draftEnabled?"Sauvegarder maintenant":"Activer la sauvegarde locale";const save=$("v61Save");if(save)save.textContent=draftEnabled?"Enregistrer":"Activer sauvegarde"}
 function dbAction(mode,fn){return new Promise((resolve,reject)=>{if(!window.indexedDB){reject(Error("Stockage local indisponible"));return}const req=indexedDB.open("blackout-hab-v6-local",1);req.onupgradeneeded=()=>req.result.createObjectStore("drafts");req.onerror=()=>reject(req.error||Error("Ouverture impossible"));req.onsuccess=()=>{const db=req.result;try{const tx=db.transaction("drafts",mode);const r=fn(tx.objectStore("drafts"));tx.oncomplete=()=>{db.close();resolve(r?.result)};tx.onabort=tx.onerror=()=>{db.close();reject(tx.error||Error("Écriture impossible"))}}catch(e){db.close();reject(e)}}})}
 function draftSnapshot(){return {schema:1,savedAt:new Date().toISOString(),identity:{...T.identity},file:T.file?{name:T.file.name,bytes:T.file.bytes.slice(),pages:T.file.pages}:null,profiles:[...T.profiles],practice:JSON.parse(JSON.stringify(T.practice)),external:JSON.parse(JSON.stringify(T.external)),verified:T.verified,scopeNotes:T.scopeNotes}}
 function writeDraft(){
