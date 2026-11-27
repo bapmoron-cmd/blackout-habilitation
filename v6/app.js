@@ -333,26 +333,27 @@ function avisPayload(signature){
 }
 
 function updateOverall(){refreshWorkspace();refreshPracticeTabs();scheduleDraft();if($("avisPreview"))$("avisPreview").textContent=avisStatus();const el=$("overallStatus");if(!el)return;const fav=T.profiles.filter(p=>gridFor(p).opinion==="favorable"&&gridStatus(p).possible).length;el.textContent=T.profiles.length+" symbole(s) · "+fav+" avis favorable(s) · "+(T.file?"PDF théorique joint":"PDF théorique absent")+" · "+(validSignature("trainer")?"Formateur signé":"Signature formateur requise");refreshSignatureUI()}
-async function trainerPDF(onlyAvis=false,returnBytes=false){
- if(!T.file)throw Error("Importez le PDF théorique avant de générer le dossier final.");
+async function trainerPDF(onlyAvis=false,returnBytes=false,draft=false){
+ if(draft&&DEMO)throw Error("Utilisez le test PDF fictif dans ce mode.");
+ if(!draft&&!T.file)throw Error("Importez le PDF théorique avant de générer le dossier final.");
  if(!T.profiles.length)throw Error("Sélectionnez au moins un symbole.");
  const req=["nom","prenom","groupe","entreprise","organisme","lieu","formateur","fonction","dateTheorie","datePratique","dureeTheorie","dureePratique","stage"];
- const missing=req.filter(k=>!T.identity[k]?.trim());if(missing.length)throw Error("Complétez tous les champs obligatoires (*) de l’identification et de la formation.");
- if(!identityMatch())throw Error("L’identité saisie ne correspond pas au PDF V5 importé. Corrigez les champs ou importez le bon fichier.");
- if(!T.reviewed)throw Error("Confirmez la relecture du dossier avant de générer le PDF.");
- const trainerSigned=validSignature("trainer"),learnerSigned=validSignature("learner");if(!trainerSigned)throw Error("Tracez et validez la signature du formateur avant de générer le PDF.");
- const fav=T.profiles.filter(p=>gridFor(p).opinion==="favorable"&&gridStatus(p).possible);if(T.profiles.some(p=>gridFor(p).opinion==="favorable"&&!gridStatus(p).possible))throw Error("Un avis favorable est incompatible avec les critères de réussite.");
- validateAvis();
+ const missing=req.filter(k=>!T.identity[k]?.trim());if(!draft&&missing.length)throw Error("Complétez tous les champs obligatoires (*) de l’identification et de la formation.");
+ if(!draft&&!identityMatch())throw Error("L’identité saisie ne correspond pas au PDF V5 importé. Corrigez les champs ou importez le bon fichier.");
+ if(!draft&&!T.reviewed)throw Error("Confirmez la relecture du dossier avant de générer le PDF.");
+ const trainerSigned=draft?null:validSignature("trainer"),learnerSigned=draft?null:validSignature("learner");if(!draft&&!trainerSigned)throw Error("Tracez et validez la signature du formateur avant de générer le PDF.");
+ const fav=draft?[]:T.profiles.filter(p=>gridFor(p).opinion==="favorable"&&gridStatus(p).possible);if(!draft&&T.profiles.some(p=>gridFor(p).opinion==="favorable"&&!gridStatus(p).possible))throw Error("Un avis favorable est incompatible avec les critères de réussite.");
+ if(!draft)validateAvis();
  const i=T.identity,ref=T.source?.packet.id||("EXT-"+Date.now().toString(36).toUpperCase());
- const avisDoc=await window.HAB_AVIS.create(avisPayload(trainerSigned),requirePdf());
- if(onlyAvis){if(DEMO)await watermarkDemo(avisDoc);const bytes=await avisDoc.save(),name=(DEMO?"DEMONSTRATION_":"")+"AVIS_PROMEO_"+safeName(i.nom)+"_"+safeName(i.prenom)+".pdf";if(returnBytes)return {bytes,name};download(bytes,name);return}
- const b=await pdfBuilder("Dossier des évaluations","Annexes théorie et pratique / avis signé",ref);
+ const avisDoc=await window.HAB_AVIS.create(draft?controlPayload():avisPayload(trainerSigned),requirePdf(),{preview:draft});
+ if(onlyAvis){if(DEMO)await watermarkDemo(avisDoc);if(draft)await watermarkControl(avisDoc);const bytes=await avisDoc.save(),name=(draft?"BROUILLON_CONTROLE_":DEMO?"DEMONSTRATION_":"")+"AVIS_PROMEO_"+safeName(i.nom)+"_"+safeName(i.prenom)+".pdf";if(returnBytes)return {bytes,name};download(bytes,name);return}
+ const b=await pdfBuilder(draft?"Dossier de contrôle non signé":"Dossier des évaluations",draft?"BROUILLON - aucune décision administrative":"Annexes théorie et pratique / avis signé",ref);
  b.doc.setTitle("Avis après formation - "+i.nom+" "+i.prenom);b.doc.setAuthor(i.organisme);b.doc.setSubject("Avis après formation préalable à l'habilitation électrique - V5 pilote");
- b.heading("01 / Identification de l'apprenti et de la formation");
+ b.heading("01 / Identification de l'apprenti et de la formation");if(draft)b.text("BROUILLON DE CONTROLE TECHNIQUE. Données saisies à ce stade ; aucune habilitation ni décision finale. Ne pas transmettre à l'employeur.",{weight:true});
  b.text(identityLine(i),{weight:true,size:12});b.text("Entreprise : "+(i.entreprise||"Non renseignée"));b.text("Organisme : "+i.organisme+"  |  Lieu : "+i.lieu);b.text("Stage : "+i.stage+"  |  Type : "+i.type);b.text("Théorie : "+dateFmt(i.dateTheorie)+" - "+i.dureeTheorie+"  |  Pratique : "+dateFmt(i.datePratique)+" - "+i.dureePratique);b.text("Formateur / signataire : "+i.formateur+" - "+i.fonction);b.text("Attributions et périmètre envisagés : "+(i.perimetre||"À préciser par l'employeur"));
  b.heading("02 / Synthèse des résultats et avis par symbole");
- for(const p of T.profiles){const g=gridFor(p),s=gridStatus(p),r=s.r;b.text(get(p)+"  |  Avis : "+ops[g.opinion],{weight:true,size:11,gap:3});b.text("Théorie : "+(r?r.good+"/"+r.total+" ("+r.pct+" %) / "+theoryLabel(r):"Non renseignée")+"  |  Pratique : "+(s.template?(s.failed?"Non réussie":s.practicePassed?"Réussie":"À compléter")+" ("+s.situations.filter(z=>z.pass).length+"/"+g.situations.length+" situations satisfaites)":"Grille non fournie"),{size:9,gap:4});if(g.reserve)b.text("Restrictions / suites : "+g.reserve,{size:9,gap:6})}
- b.heading("03 / Recommandations et visa");b.text("Titre(s) demandé(s) par l’entreprise : "+requestedTitles(),{weight:true});b.text("Symboles faisant l'objet d'un avis favorable : "+(fav.map(get).join(" ; ")||"Aucun"),{weight:true});b.text("Observations globales : "+(T.scopeNotes||"Aucune observation globale renseignée."));b.text("Le titre d'habilitation relève de l'employeur (article R. 4544-10 du Code du travail). Ce document est un avis après formation, et non un titre. Version pilote : validation institutionnelle requise avant usage officiel.",{size:9});b.text("L’avis PROMEO signé est en tête du dossier ; les visas du formateur et de l’apprenti figurent aussi avant l’annexe théorique.",{size:9});
+ for(const p of T.profiles){const g=gridFor(p),s=gridStatus(p),r=s.r;b.text(get(p)+(draft?"  |  Avis saisi (non final) : ":"  |  Avis : ")+ops[g.opinion],{weight:true,size:11,gap:3});b.text("Théorie : "+(r?r.good+"/"+r.total+" ("+r.pct+" %) / "+theoryLabel(r):"Non renseignée")+"  |  Pratique : "+(s.template?(s.failed?"Non réussie":s.practicePassed?"Réussie":"À compléter")+" ("+s.situations.filter(z=>z.pass).length+"/"+g.situations.length+" situations satisfaites)":"Grille non fournie"),{size:9,gap:4});if(g.reserve)b.text("Restrictions / suites : "+g.reserve,{size:9,gap:6});if(draft)for(const issue of decisionReview(p).blockers)b.text("Reste à compléter : "+issue,{size:9,gap:3})}
+ b.heading("03 / Recommandations et visa");b.text("Titre(s) demandé(s) par l’entreprise : "+requestedTitles(),{weight:true});b.text(draft?"Aucun avis favorable émis dans ce brouillon.":"Symboles faisant l'objet d'un avis favorable : "+(fav.map(get).join(" ; ")||"Aucun"),{weight:true});b.text("Observations globales : "+(T.scopeNotes||"Aucune observation globale renseignée."));b.text("Le titre d'habilitation relève de l'employeur (article R. 4544-10 du Code du travail). Ce document est un avis après formation, et non un titre. Version pilote : validation institutionnelle requise avant usage officiel.",{size:9});b.text(draft?"Aperçu PROMEO non signé en tête du dossier. Signatures volontairement exclues.":"L’avis PROMEO signé est en tête du dossier ; les visas du formateur et de l’apprenti figurent aussi avant l’annexe théorique.",{size:9});
 
  for(const p of T.profiles){
  const g=gridFor(p),s=gridStatus(p),r=s.r,t=s.template;b.newPage();b.heading("04 / Grille pratique - "+get(p));b.text("Source : "+(t?t.source+" - grille Word fournie":"Grille non fournie"),{weight:true});b.text("Théorie : "+(r?r.good+"/"+r.total+" ("+r.pct+" %) / "+theoryLabel(r):"Non renseignée")+" ; contrôle formateur : "+(T.verified?"déclaré effectué":"non confirmé"),{size:9});
@@ -360,15 +361,15 @@ async function trainerPDF(onlyAvis=false,returnBytes=false){
  if(p==="BC")b.text("Note : l'objectif et l'indicateur relatifs à la consignation diffèrent dans le document source. Formulations conservées ; à vérifier avec le référent.",{size:9});
  for(let j=0;j<g.situations.length;j++){const sit=g.situations[j],z=s.situations[j];b.newPage();b.heading(get(p)+" - Mise en situation n°"+(j+1));b.text("Intitulé : "+(sit.title||"Non renseigné"),{weight:true});b.text(PRACTICE_RULE,{size:9});for(let k=0;k<sit.criteria.length;k++){const c=sit.criteria[k];b.text((k+1)+". "+c.text,{weight:true,size:10,gap:2});b.text("Notation : "+(marks[c.mark]?c.mark+" - "+marks[c.mark]:"Non renseignée")+(c.note?"  |  "+c.note:""),{size:9,gap:6})}b.text(countText(z.counts),{weight:true});b.text("Bilan de la situation : "+(z.failed?"Critères non satisfaits":z.pass?"Critères satisfaits":"À compléter"),{weight:true});b.text("Observations : "+(sit.observations||"Non renseignées"),{size:9});}
  }else b.text("Aucun avis favorable autorisé tant que la grille correspondant au symbole n'est pas fournie.",{weight:true});
- b.heading("Bilan pratique et avis");b.text(t?"Situations satisfaites : "+s.situations.filter(z=>z.pass).length+"/"+g.situations.length+" ; minimum réel "+t.min+(DEMO?" ; minimum de test 1":"")+" ; bilan : "+(s.failed?"Non réussie":s.practicePassed?"Réussie":"À compléter"):"Grille non fournie",{weight:true});if(t)b.text("Critères d'acceptation : "+PRACTICE_RULE+" Toutes les situations doivent être renseignées et satisfaisantes. L'avis favorable requiert aussi une théorie positive et contrôlée.",{size:9});b.text("Observations globales : "+(g.observations||"Non renseignées"));b.text("Avis du formateur : "+ops[g.opinion],{weight:true});b.text("Restrictions / suites : "+(g.reserve||"Non renseignées"));
+ b.heading("Bilan pratique et avis");b.text(t?"Situations satisfaites : "+s.situations.filter(z=>z.pass).length+"/"+g.situations.length+" ; minimum réel "+t.min+(DEMO?" ; minimum de test 1":"")+" ; bilan : "+(s.failed?"Non réussie":s.practicePassed?"Réussie":"À compléter"):"Grille non fournie",{weight:true});if(t)b.text("Critères d'acceptation : "+PRACTICE_RULE+" Toutes les situations doivent être renseignées et satisfaisantes. L'avis favorable requiert aussi une théorie positive et contrôlée.",{size:9});b.text("Observations globales : "+(g.observations||"Non renseignées"));b.text((draft?"Avis saisi, non final : ":"Avis du formateur : ")+ops[g.opinion],{weight:true});b.text("Restrictions / suites : "+(g.reserve||"Non renseignées"));
  }
 
- b.newPage();b.heading("05 / Signatures et validation de l'avis");b.text(identityLine(i),{weight:true,size:12});b.text("Référence du dossier : "+ref);b.text("Avis favorables : "+(fav.map(get).join(" ; ")||"Aucun"));b.text("Le formateur confirme avoir relu le dossier et ses observations. La signature de l'apprenti, si présente, atteste uniquement sa prise de connaissance.",{size:10});await b.signature("Formateur / signataire de l'avis",i.formateur+" - "+i.fonction,trainerSigned);await b.signature("Apprenti / prise de connaissance (facultatif)",i.nom+" "+i.prenom,learnerSigned);b.text("Signatures manuscrites numérisées, sans certificat électronique ni horodatage de confiance. Le titre d'habilitation relève de l'employeur.",{size:9});
- b.newPage();b.heading("06 / Annexe - évaluation théorique originale");b.text("Fichier joint : "+T.file.name,{weight:true});b.text("Nombre de pages annexées : "+T.file.pages);b.text("Source : "+(T.source?"PDF V5 reconnu, réponses recalculées localement":"PDF externe, résultats reportés manuellement"));b.text("Contrôle des conditions de réalisation par le formateur : "+(T.verified?"confirmé":"non confirmé"));b.text("Le PDF original est reproduit à la suite de cette page. Les métadonnées d'un fichier local ne constituent pas une preuve d'authenticité.",{size:9});b.text("Références de cadrage : INRS ED 6127, sections 5.4 et 7.2 ; Code du travail, article R. 4544-10. Vérifier les référentiels et prescriptions applicables au contexte de formation.",{size:9});
- const {PDFDocument}=requirePdf(),original=await PDFDocument.load(T.file.bytes),pages=await b.doc.copyPages(original,original.getPageIndices());pages.forEach(p=>b.doc.addPage(p));
+ b.newPage();b.heading(draft?"05 / Brouillon non signé":"05 / Signatures et validation de l'avis");b.text(identityLine(i),{weight:true,size:12});b.text("Référence du dossier : "+ref);if(draft){b.text("Aucun visa dans le PDF de contrôle. Les données et les résultats affichés sont provisoires. Les signatures éventuellement déjà saisies ne sont pas modifiées ni copiées.",{weight:true})}else{b.text("Avis favorables : "+(fav.map(get).join(" ; ")||"Aucun"));b.text("Le formateur confirme avoir relu le dossier et ses observations. La signature de l'apprenti, si présente, atteste uniquement sa prise de connaissance.",{size:10});await b.signature("Formateur / signataire de l'avis",i.formateur+" - "+i.fonction,trainerSigned);await b.signature("Apprenti / prise de connaissance (facultatif)",i.nom+" "+i.prenom,learnerSigned);b.text("Signatures manuscrites numérisées, sans certificat électronique ni horodatage de confiance. Le titre d'habilitation relève de l'employeur.",{size:9})}
+ b.newPage();b.heading("06 / Annexe - évaluation théorique originale");b.text("Fichier joint : "+(T.file?.name||"Aucun PDF importé"),{weight:true});b.text("Nombre de pages annexées : "+(T.file?.pages||0));b.text("Source : "+(T.source?"PDF V5 reconnu, réponses recalculées localement":"PDF externe, résultats reportés manuellement"));b.text("Contrôle des conditions de réalisation par le formateur : "+(T.verified?"confirmé":"non confirmé"));b.text(T.file?"Le PDF importé est reproduit à la suite de cette page. Les métadonnées d'un fichier local ne constituent pas une preuve d'authenticité.":"Aucun résultat théorique original n'est annexé à ce brouillon.",{size:9});b.text("Références de cadrage : INRS ED 6127, sections 5.4 et 7.2 ; Code du travail, article R. 4544-10. Vérifier les référentiels et prescriptions applicables au contexte de formation.",{size:9});
+ const {PDFDocument}=requirePdf();if(T.file){const original=await PDFDocument.load(T.file.bytes),pages=await b.doc.copyPages(original,original.getPageIndices());pages.forEach(p=>b.doc.addPage(p));}
  const avisPages=await b.doc.copyPages(avisDoc,avisDoc.getPageIndices());avisPages.forEach((p,i)=>b.doc.insertPage(i,p));
- if(DEMO)await watermarkDemo(b.doc);
- const bytes=await b.doc.save(),name=(DEMO?"DEMONSTRATION_":"")+"AVIS_HABILITATION_"+safeName(i.nom)+"_"+safeName(i.prenom)+"_"+ref+".pdf";if(returnBytes)return {bytes,name};download(bytes,name);
+ if(DEMO)await watermarkDemo(b.doc);if(draft)await watermarkControl(b.doc);
+ const bytes=await b.doc.save(),name=(draft?"BROUILLON_CONTROLE_":DEMO?"DEMONSTRATION_":"")+"AVIS_HABILITATION_"+safeName(i.nom)+"_"+safeName(i.prenom)+"_"+ref+".pdf";if(returnBytes)return {bytes,name};download(bytes,name);
 }
 
 /* V6 : navigation et ergonomie, sans changement des grilles ni des barèmes. */
@@ -403,6 +404,10 @@ function mountWorkspace(){
  root.insertBefore(banner,hero.nextSibling);
  const nav=element("nav","v6-steps",stages.map(([id,label],i)=>'<button type="button" data-stage-link="'+id+'"><span class="v6-stepno">'+(i+1)+'</span><span><b>'+label+'</b><small data-step-state="'+id+'">À compléter</small></span></button>').join(""));nav.setAttribute("aria-label","Étapes du dossier");banner.after(nav);
  const error=$("error");if(error){error.classList.add("v6-error");nav.after(error)}
+ if(!DEMO){const controls=element("section","v6-control-bar",'<div><b>Contrôle PDF du dossier en cours</b><small>Possible même avec une seule situation ou des champs manquants. Brouillon non signé, sans valeur administrative.</small></div><div class="toolbar"><button type="button" id="v6ControlPreview" class="secondary">Aperçu de contrôle</button><button type="button" id="v6ControlDownload" class="secondary">Télécharger le dossier de contrôle</button></div>');(error||nav).after(controls);
+ $("v6ControlPreview").onclick=()=>actionPDF($("v6ControlPreview"),previewAvis);
+ $("v6ControlDownload").onclick=()=>actionPDF($("v6ControlDownload"),async()=>{const before=A.inert;A.inert=true;try{await trainerPDF(false,false,true)}finally{A.inert=before}});
+ }
  const layout=element("div","v6-layout");root.insertBefore(layout,theory);
  const aside=element("aside","v6-sidebar",'<section class="panel"><h3>Suivi du dossier</h3><div id="v6SymbolSummary"></div><div id="v6Checklist"></div></section><section class="panel v6-draft"><h3>Brouillon local</h3><p class="fine">Sur ce navigateur uniquement. PDF et données nominatives restent sur ce poste. N’activez pas la sauvegarde sur un poste partagé. Les signatures ne sont jamais conservées.</p><button type="button" id="v6SaveDraft" class="secondary">Activer la sauvegarde locale</button><button type="button" id="v6RestoreDraft" class="secondary">Reprendre un brouillon</button><button type="button" id="v6EraseDraft" class="secondary">Effacer le brouillon enregistré</button><button type="button" id="v6NewDraft" class="secondary">Nouveau dossier</button></section>');
  const content=element("div","v6-content");layout.append(content,aside);
@@ -412,7 +417,7 @@ function mountWorkspace(){
  block.append(buttons);content.append(block);
  }
  if(foot)root.append(foot);
- const reviewed=$("reviewed");if(reviewed){const controls=element("div","v6-previewbar",'<h3>Relire avant de signer</h3><p class="fine">Affiche le véritable avis PDF en brouillon, sans signature. Terminez les avis et les informations requises pour le prévisualiser.</p><button type="button" id="v6Preview" class="secondary">Prévisualiser l’avis PROMEO</button>');reviewed.closest("label").before(controls);$("v6Preview").onclick=()=>actionPDF($("v6Preview"),previewAvis)}
+ const reviewed=$("reviewed");if(reviewed){const controls=element("div","v6-previewbar",'<h3>Relire avant de signer</h3><p class="fine">Affiche le modèle PROMEO en brouillon non signé, même si le dossier est incomplet. Les décisions saisies sont indiquées dans les commentaires ; aucun avis officiel n’est émis.</p><button type="button" id="v6Preview" class="secondary">Prévisualiser l’avis PROMEO</button>');reviewed.closest("label").before(controls);$("v6Preview").onclick=()=>actionPDF($("v6Preview"),previewAvis)}
  root.querySelectorAll("[data-stage-link]").forEach(e=>e.onclick=()=>setStage(e.dataset.stageLink));
  $("v6SaveDraft").onclick=()=>activateDraft();
  $("v6RestoreDraft").onclick=()=>restoreDraft();
@@ -462,12 +467,31 @@ function refreshPracticeTabs(){
  const undo=$("v6UndoBar");if(undo){const valid=v6Undo&&T.practice[v6Undo.p]===v6Undo.grid&&T.profiles.includes(v6Undo.p)&&v6Undo.grid.situations.length<12;undo.innerHTML=valid?'<div class="info v6-undo"><span>Dernière suppression : '+E(get(v6Undo.p))+' · situation '+(v6Undo.index+1)+'</span><button type="button" class="secondary" id="undoSituation">Annuler la suppression</button></div>':'';
  if(valid)$("undoSituation").onclick=()=>{const x=v6Undo;if(!x||T.practice[x.p]!==x.grid||x.grid.situations.length>=12)return;x.grid.situations.splice(Math.min(x.index,x.grid.situations.length),0,x.situation);x.grid.opinion="incomplet";v6Profile=x.p;v6Situation[x.p]=x.index;v6Undo=null;invalidateSignatureReview();renderPractices()}}
 }
+
+/* Export de contrôle du dossier actuellement ouvert : ni validation ni signature. */
+function controlPayload(){
+ const d=avisPayload(null);
+ const remarks=["BROUILLON DE CONTROLE - AVIS NON EMIS. Les cases et le tableau de proposition sont volontairement neutralisés."];
+ for(const p of T.profiles){const g=gridFor(p),s=gridStatus(p),r=decisionReview(p);remarks.push(get(p)+" : avis saisi (non final) : "+ops[g.opinion]+" ; "+s.situations.filter(z=>z.complete).length+" situation(s) renseignée(s), minimum réel "+minimum(p)+".");for(const issue of r.blockers)remarks.push(get(p)+" : "+issue+".")}
+ if(!T.file)remarks.push("PDF théorique absent.");
+ else if(!T.verified)remarks.push("Résultats théoriques non contrôlés.");
+ if(T.file&&!identityMatch())remarks.push("Identité différente du PDF importé.");
+ for(const [key,label] of [["nom","Nom"],["prenom","Prénom"],["entreprise","Entreprise"],["lieu","Lieu"],["formateur","Formateur"]])if(!String(d[key]||"").trim())d[key]="[Non renseigné : "+label+"]";
+ d.profiles=d.profiles.map(p=>({...p,opinion:"incomplet"}));d.comments=[...remarks,...d.comments];return d;
+}
+async function watermarkControl(doc){
+ const {StandardFonts,rgb,degrees}=requirePdf(),font=await doc.embedFont(StandardFonts.HelveticaBold),label="BROUILLON DE CONTROLE - NON SIGNE - NE PAS TRANSMETTRE";
+ for(const page of doc.getPages()){const {width,height}=page.getSize(),size=Math.min(11,(width-16)/font.widthOfTextAtSize(label,1)),markSize=Math.min(60,width/8);
+ page.drawRectangle({x:0,y:0,width,height:23,color:rgb(1,.93,.92)});
+ page.drawText(label,{x:(width-font.widthOfTextAtSize(label,size))/2,y:7,size,font,color:rgb(.7,.05,.1)});
+ page.drawText("BROUILLON",{x:width*.15,y:height*.43,size:markSize,font,color:rgb(.7,.08,.1),opacity:.2,rotate:degrees(31)});
+ }
+ doc.setTitle("BROUILLON DE CONTROLE - NON SIGNE");doc.setSubject("BROUILLON TECHNIQUE - AUCUN AVIS ADMINISTRATIF");
+}
+
 async function previewAvis(){
- if(!T.file||!T.profiles.length)throw Error("Importez la théorie et sélectionnez les symboles.");
- if(requiredIdentity.some(k=>!T.identity[k]?.trim()))throw Error("Complétez les champs obligatoires de l’identification et de la formation.");
- if(!identityMatch())throw Error("L’identité diffère du PDF importé.");
- validateAvis();
- const pdf=await window.HAB_AVIS.create(avisPayload(null),requirePdf(),{preview:true});if(DEMO)await watermarkDemo(pdf);const bytes=await pdf.save(),url=URL.createObjectURL(new Blob([bytes],{type:"application/pdf"}));
+ if(!T.profiles.length)throw Error("Sélectionnez au moins un symbole.");
+ const pdf=await window.HAB_AVIS.create(DEMO?avisPayload(null):controlPayload(),requirePdf(),{preview:true});if(DEMO)await watermarkDemo(pdf);else await watermarkControl(pdf);const bytes=await pdf.save(),url=URL.createObjectURL(new Blob([bytes],{type:"application/pdf"}));
  const dialog=element("dialog","v6-pdf-dialog",'<div class="row"><div><h2>Aperçu de l’avis PROMEO</h2><p class="fine">BROUILLON NON SIGNÉ — ne pas transmettre</p></div><button type="button" class="secondary" id="v6ClosePreview">Fermer</button></div><iframe title="Brouillon PDF de l’avis PROMEO"></iframe><p class="fine">Si le lecteur intégré est indisponible, <a target="_blank" rel="noopener" id="v6OpenPreview">ouvrir le brouillon dans un nouvel onglet</a>.</p>');document.body.append(dialog);dialog.querySelector("iframe").src=url;dialog.querySelector("#v6OpenPreview").href=url;dialog.querySelector("#v6ClosePreview").onclick=()=>dialog.close();dialog.addEventListener("close",()=>{dialog.remove();URL.revokeObjectURL(url)},{once:true});dialog.showModal();
 }
 /* Opt-in local draft: one record, no signatures, no network. */
