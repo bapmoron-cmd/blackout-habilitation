@@ -44,3 +44,11 @@ body[data-mode=theorie] main{max-width:1080px}body[data-mode=theorie] .examgrid{
 
 /* V6.0.6 : adaptation motivée dans le dossier formateur original */
 .v6-adjust{border:1px solid var(--line);border-radius:10px;padding:13px 15px;margin:10px 0 14px;background:var(--surface2)}.v6-adjust>b{display:block;margin-bottom:5px}.v6-adjust .fine{margin:5px 0}.v6-adjust textarea{min-height:70px}.v6-steps .step-conditional small{color:var(--warn);font-weight:700}
+
+/* V6.0.7 — commentaires types sélectionnables et modifiables */
+.v6-comment-field{min-width:0}
+.v6-comment-tools{display:flex;align-items:flex-start;gap:6px;flex-wrap:wrap;margin:4px 0 8px}
+.v6-comment-tools .v6-comment-select{width:100%;max-width:420px;font-size:.78rem;min-height:30px;padding:5px 8px;color:var(--accent);background:var(--surface2);border:1px solid var(--line);border-radius:7px}
+.v6-comment-tools small:empty{display:none}
+.v6-comment-tools small{font-size:.72rem}
+.criterion-note .v6-comment-tools{margin:4px 0}

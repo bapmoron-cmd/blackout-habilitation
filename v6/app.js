@@ -8,6 +8,7 @@ const P=Object.fromEntries(D.profiles.map(p=>[p.id,p])), Q=Object.fromEntries(D.
 const MODE=document.body.dataset.mode, VERSION=D.version, PREFIX="BLACKOUT-HAB-V5:", KEY="blackout-hab-v6-theory-"+VERSION;
 const DEMO=MODE==="formateur"&&document.body.dataset.demo==="true";
 const minimum=p=>PRACTICE[p]?(DEMO?1:PRACTICE[p].min):0;
+const STUDENT_FIELDS=["nom","prenom","groupe","entreprise","lieu","organisme","dateTheorie"];
 const themes={risk:"Dangers et protections",zone:"Zones et distances",limit:"Limites du symbole"};
 const marks={A:"Sans erreur",B:"Erreur acceptable",C:"Erreur majeure",D:"Erreur grave"};
 const PRACTICE_RULE="Aucun D et au plus un C pour chaque mise en situation.";
@@ -48,11 +49,30 @@ function scoreExam(id,ids,answers,seconds=0){
 }
 function encodePacket(obj){const a=new TextEncoder().encode(JSON.stringify(obj));let s="";for(let i=0;i<a.length;i+=8192)s+=String.fromCharCode(...a.subarray(i,i+8192));return PREFIX+btoa(s)}
 function decodePacket(s){if(!s||!s.startsWith(PREFIX))return null;if(s.length>300000)throw Error("Métadonnées trop volumineuses");const b=atob(s.slice(PREFIX.length));return JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(Uint8Array.from(b,c=>c.charCodeAt(0))))}
+
+function validTheoryDate(v){if(typeof v!=="string"||!/^\d{4}-\d{2}-\d{2}$/.test(v))return false;const time=Date.parse(v+"T00:00:00Z");return Number.isFinite(time)&&new Date(time).toISOString().slice(0,10)===v}
+function studentIdentity(raw){
+ if(!raw||typeof raw!=="object"||Array.isArray(raw))throw Error("Identité incomplète");
+ const result={};
+ for(const k of STUDENT_FIELDS){const v=raw[k],required=["nom","prenom","groupe"].includes(k);
+  if(v===undefined&&!required)continue;
+  if(typeof v!=="string"||v.length>150||!v.trim())throw Error("Information apprenti invalide : "+k);
+  if(k==="dateTheorie"&&!validTheoryDate(v.trim()))throw Error("Date de l’évaluation théorique invalide.");
+  result[k]=v.trim();
+ }
+ return result;
+}
+function applyStudentIdentity(source,target){
+ const i=studentIdentity(source.packet.identity);
+ for(const k of STUDENT_FIELDS)if(Object.prototype.hasOwnProperty.call(i,k))target[k]=i[k];
+ if(!i.dateTheorie){const fallback=String(source.packet.date||"").slice(0,10);if(validTheoryDate(fallback))target.dateTheorie=fallback}
+}
+
 function validatePacket(o){
  if(!o||o.version!==VERSION||!o.identity||!Array.isArray(o.profiles)||!o.profiles.length||!uniq(o.profiles)||o.profiles.some(p=>!P[p])||typeof o.id!=="string"||typeof o.date!=="string"||!o.results||Object.keys(o.results).length!==o.profiles.length)throw Error("PDF V5 incompatible ou incomplet");
- for(const k of ["nom","prenom","groupe"])if(typeof o.identity[k]!=="string"||!o.identity[k].trim()||o.identity[k].length>150)throw Error("Identité incomplète");
+ const identity=studentIdentity(o.identity);
  const results={};for(const p of o.profiles){const r=o.results[p];if(!r)throw Error("Résultat manquant");results[p]=scoreExam(p,r.ids,r.answers,r.seconds)}
- return {packet:o,results};
+ return {packet:{...o,identity},results};
 }
 function requirePdf(){if(!window.PDFLib)throw Error("Le moteur PDF n’a pas pu charger. Vérifiez la connexion Internet et actualisez la page.");return window.PDFLib}
 function normalizePDF(t){return String(t??"").replace(/[’‘]/g,"'").replace(/[“”]/g,'"').replace(/[–—−]/g,"-").replace(/…/g,"...").replace(/œ/g,"oe").replace(/Œ/g,"OE").replace(/\u202f/g," ").replace(/[^\x20-\x7e\xa0-\xff\n]/g," ")}
@@ -80,14 +100,14 @@ function save(){try{if(S)sessionStorage.setItem(KEY,JSON.stringify(S));else sess
 function restore(){try{let o=JSON.parse(sessionStorage.getItem(KEY)||"null");if(o&&o.version===VERSION&&o.identity&&Array.isArray(o.profiles)&&o.profiles.length&&o.profiles.every(p=>P[p])&&o.results)S=o}catch{}}
 function theoryLanding(){
  A.innerHTML=hero("Espace apprenti / 01","Évaluation théorique","Renseignez votre identité, choisissez les habilitations demandées par votre formateur, puis téléchargez votre résultat en un seul PDF.")+
- '<form id="startForm"><section class="panel"><div class="eyebrow">01 / Identification</div><h2>Votre identité</h2><div class="grid fields">'+field("nom","Nom","","text",true)+field("prenom","Prénom","","text",true)+field("groupe","Classe / groupe","","text",true)+'</div></section><section class="panel"><div class="eyebrow">02 / Parcours</div><h2>Symboles à évaluer</h2><p class="muted">15 questions par parcours : 5 dangers/protections, 5 zones/distances, 5 limites. 20 minutes par parcours.</p>'+profilePicker([])+'</section><section class="panel"><h2>Consignes</h2><p>'+E(ruleText())+'</p><p>Plusieurs réponses peuvent être justes. Les questions non renseignées comptent comme incorrectes. Le chronomètre continue lors d’une actualisation. La sauvegarde est limitée à cet onglet : ne le fermez pas avant d’avoir téléchargé votre PDF.</p><div class="notice">'+E(pilot)+'</div><label class="checkline"><input type="checkbox" id="agree" required>Je confirme que j’ai sélectionné les symboles demandés et que je réaliserai le test selon les consignes du formateur.</label><p class="error" id="error" role="alert"></p><button class="primary" type="submit">Accéder à mon parcours →</button></section></form>'+footer();
- $("startForm").onsubmit=e=>{e.preventDefault();const identity=Object.fromEntries(["nom","prenom","groupe"].map(k=>[k,$(k).value.trim()])),profiles=chosen();if(!profiles.length)return showError("Sélectionnez au moins un symbole.");if(Object.values(identity).some(s=>!s))return showError("Renseignez les trois champs.");S={version:VERSION,id:"HAB-"+(crypto.randomUUID?crypto.randomUUID():Math.random().toString(36).slice(2)+Date.now()).slice(0,12).toUpperCase(),date:new Date().toISOString(),identity,profiles,results:{},exam:null};save();renderTheory()};
+ '<form id="startForm"><section class="panel"><div class="eyebrow">01 / Identification</div><h2>Votre identité</h2><div class="grid fields">'+field("nom","Nom","","text",true)+field("prenom","Prénom","","text",true)+field("groupe","Classe / groupe","","text",true)+field("entreprise","Entreprise (ou Sans entreprise)","","text",true)+field("lieu","Lieu de formation (centre / ville)","","text",true)+field("organisme","Organisme de formation","PROMEO","text",true)+field("dateTheorie","Date de l’évaluation théorique",today(),"date",true)+'</div><p class="fine" style="margin-top:12px">Ces renseignements seront inclus dans votre PDF et prérempliront le dossier du formateur. Vérifiez-les avant de commencer.</p></section><section class="panel"><div class="eyebrow">02 / Parcours</div><h2>Symboles à évaluer</h2><p class="muted">15 questions par parcours : 5 dangers/protections, 5 zones/distances, 5 limites. 20 minutes par parcours.</p>'+profilePicker([])+'</section><section class="panel"><h2>Consignes</h2><p>'+E(ruleText())+'</p><p>Plusieurs réponses peuvent être justes. Les questions non renseignées comptent comme incorrectes. Le chronomètre continue lors d’une actualisation. La sauvegarde est limitée à cet onglet : ne le fermez pas avant d’avoir téléchargé votre PDF.</p><div class="notice">'+E(pilot)+'</div><label class="checkline"><input type="checkbox" id="agree" required>Je confirme que j’ai sélectionné les symboles demandés et que je réaliserai le test selon les consignes du formateur.</label><p class="error" id="error" role="alert"></p><button class="primary" type="submit">Accéder à mon parcours →</button></section></form>'+footer();
+ $("startForm").onsubmit=e=>{e.preventDefault();const raw=Object.fromEntries(STUDENT_FIELDS.map(k=>[k,$(k).value.trim()])),profiles=chosen();if(!profiles.length)return showError("Sélectionnez au moins un symbole.");if(Object.values(raw).some(s=>!s))return showError("Renseignez tous les champs d’identification et de formation.");let identity;try{identity=studentIdentity(raw)}catch(err){return showError(err.message)}S={version:VERSION,id:"HAB-"+(crypto.randomUUID?crypto.randomUUID():Math.random().toString(36).slice(2)+Date.now()).slice(0,12).toUpperCase(),date:new Date().toISOString(),identity,profiles,results:{},exam:null};save();renderTheory()};
 }
 function theoryDashboard(){
  const pending=S.profiles.find(p=>!S.results[p]),done=S.profiles.length-(S.profiles.filter(p=>!S.results[p]).length),all=!pending;
- A.innerHTML=hero("Espace apprenti / "+(all?"03":"02"),all?"Votre bilan est prêt":"Votre parcours",identityLine(S.identity)+" · Réf. "+S.id)+
+ A.innerHTML=hero("Espace apprenti / "+(all?"03":"02"),all?"Votre bilan est prêt":"Votre parcours",identityLine(S.identity)+" · "+[S.identity.entreprise,S.identity.organisme,S.identity.lieu,S.identity.dateTheorie?dateFmt(S.identity.dateTheorie):""].filter(Boolean).join(" · ")+" · Réf. "+S.id)+
  '<section class="panel"><div class="row"><div><div class="eyebrow">Avancement</div><div class="metric">'+done+' / '+S.profiles.length+'</div></div>'+status(all?"Terminé":"En cours",all?"good":"wait")+'</div><div class="progress"><i style="width:'+done/S.profiles.length*100+'%"></i></div><div class="scroll" style="margin-top:18px"><table><thead><tr><th>Symbole</th><th>Score</th><th>Temps</th><th>Résultat</th></tr></thead><tbody>'+S.profiles.map(p=>{let r=S.results[p]?scoreExam(p,S.results[p].ids,S.results[p].answers,S.results[p].seconds):null;return '<tr><td><b>'+E(get(p))+'</b></td><td>'+(r?r.good+'/'+r.total+' · '+r.pct+' %':'—')+'</td><td>'+(r?displayTime(r.seconds):"—")+'</td><td>'+(r?status(theoryLabel(r),r.passed?"good":"bad"):status("À passer","wait"))+'</td></tr>'}).join("")+'</tbody></table></div></section>'+
- (all?'<section class="panel"><h2>Transmettre votre PDF au formateur</h2><p>Le fichier contient votre identité, les scores et les réponses détaillées. Téléchargez-le et transmettez-le par le canal demandé par votre formateur. N’envoyez pas de données nominatives sur GitHub.</p><button id="theoryPDF" class="primary">Télécharger mon PDF de théorie</button><p id="downloaded" class="success" role="status"></p><p class="error" id="error" role="alert"></p></section>':'<section class="panel"><div class="eyebrow">Prochaine épreuve</div><h2>'+E(get(pending))+'</h2><p>15 questions · 20 minutes · correction en fin d’épreuve.</p><button class="primary" id="begin">Commencer cette épreuve →</button></section>')+
+ (all?'<section class="panel"><h2>Transmettre votre PDF au formateur</h2><p>Le fichier contient votre identité, les informations de formation, les scores et les réponses détaillées. Téléchargez-le et transmettez-le par le canal demandé par votre formateur. N’envoyez pas de données nominatives sur GitHub.</p><button id="theoryPDF" class="primary">Télécharger mon PDF de théorie</button><p id="downloaded" class="success" role="status"></p><p class="error" id="error" role="alert"></p></section>':'<section class="panel"><div class="eyebrow">Prochaine épreuve</div><h2>'+E(get(pending))+'</h2><p>15 questions · 20 minutes · correction en fin d’épreuve.</p><button class="primary" id="begin">Commencer cette épreuve →</button></section>')+
  '<div class="toolbar"><button id="restart" class="secondary">Effacer la session / nouvel apprenti</button></div>'+footer();
  $("restart").onclick=()=>{if(confirm("Effacer cette session et les résultats présents dans cet onglet ? Assurez-vous d’avoir téléchargé les PDF nécessaires.")){S=null;save();renderTheory()}};
  if(pending)$("begin").onclick=()=>{S.exam=makeExam(pending);save();renderTheory()};
@@ -112,8 +132,8 @@ function renderTheory(){if(!S)theoryLanding();else if(S.exam)examScreen();else t
 async function theoryPDF(){
  const packet={version:VERSION,id:S.id,date:S.date,identity:S.identity,profiles:S.profiles,results:S.results};
  const validated=validatePacket(packet),b=await pdfBuilder("Résultats de l'évaluation théorique","Formation préalable à l'habilitation électrique",S.id);
- b.doc.setTitle("Résultats théoriques - "+S.identity.nom+" "+S.identity.prenom);b.doc.setAuthor("BLACKOUT HABILITATION");b.doc.setSubject(encodePacket(packet));b.doc.setCreator("BLACKOUT HABILITATION V5");
- b.heading("01 / Identification");b.text(identityLine(S.identity),{weight:true,size:12});b.text("Date : "+dateFmt(S.date)+"   |   Référence : "+S.id);
+ b.doc.setTitle("Résultats théoriques - "+S.identity.nom+" "+S.identity.prenom);b.doc.setAuthor("BLACKOUT HABILITATION");b.doc.setSubject(encodePacket(packet));b.doc.setCreator("BLACKOUT HABILITATION V6");
+ b.heading("01 / Identification");b.text(identityLine(S.identity),{weight:true,size:12});b.text("Entreprise : "+(S.identity.entreprise||"Non renseignée")+" | Organisme de formation : "+(S.identity.organisme||"Non renseigné"));b.text("Lieu de formation : "+(S.identity.lieu||"Non renseigné"));b.text("Date de théorie : "+dateFmt(S.identity.dateTheorie||S.date)+" | Référence : "+S.id);
  b.heading("02 / Résultats par symbole");for(const p of S.profiles){const r=validated.results[p];b.text(get(p)+"  |  "+r.good+"/"+r.total+" ("+r.pct+" %)  |  "+theoryLabel(r)+"  |  Temps "+displayTime(r.seconds)+"  |  Erreurs critiques : "+r.critical,{weight:true});b.text(Object.keys(themes).map(k=>themes[k]+" "+r.themes[k][0]+"/5").join("  |  "),{size:9,gap:8})}
  b.heading("03 / Conditions et limites");b.text(ruleText(),{size:9});b.text("Résultats produits localement, sans authentification cryptographique. Le formateur doit contrôler l'identité, les conditions du test et la cohérence des résultats. "+pilot,{size:9});
  for(const p of S.profiles){const r=validated.results[p];b.newPage();b.heading("Correction détaillée - "+get(p));b.text("Résultat : "+r.good+"/"+r.total+" ("+r.pct+" %) / "+theoryLabel(r),{weight:true});for(let i=0;i<r.detail.length;i++){const d=r.detail[i],q=Q[d.id];b.section((i+1)+". "+(d.ok?"Correct":"Incorrect")+(d.critical?" / critique":""));b.text(q.question,{weight:true,gap:3});b.text("Réponse donnée : "+(d.selected.map(k=>q.options[k].text).join(" ; ")||"Aucune"),{size:9,gap:3});b.text("Réponse attendue : "+d.correct.map(k=>q.options[k].text).join(" ; "),{size:9,gap:8});}}
@@ -166,7 +186,7 @@ function initSignaturePad(role){
 
 
 function newSituation(p){const template=PRACTICE[p];return {title:"",criteria:(template?.criteria||[]).map(text=>({text,mark:"",note:""})),observations:""}}
-function emptyGrid(p){const template=PRACTICE[p];return {situations:template?Array.from({length:minimum(p)},()=>newSituation(p)):[],observations:"",opinion:"incomplet",reserve:"",avisTension:"",avisOuvrages:"",avisIndications:"",adjustConfirmed:false,adjustReason:"",adjustAuthorized:false}}
+function emptyGrid(p){const template=PRACTICE[p];return {situations:template?Array.from({length:1},()=>newSituation(p)):[],observations:"",opinion:"incomplet",reserve:"",avisTension:"",avisOuvrages:"",avisIndications:""}}
 function gridFor(p){return T.practice[p]||(T.practice[p]=emptyGrid(p))}
 function removeSituation(p,index){const g=gridFor(p);if(!PRACTICE[p]||!Number.isInteger(index)||index<0||index>=g.situations.length)return false;g.situations.splice(index,1);g.opinion="incomplet";invalidateSignatureReview();return true}
 
@@ -184,14 +204,16 @@ function situationStatus(s){
  const complete=!!s.title.trim()&&s.criteria.length>0&&counts.unseen===0,failed=counts.D>0||counts.C>1;
  return {counts,complete,failed,pass:complete&&!failed};
 }
-function adaptationActive(p,g){return !DEMO&&minimum(p)>1&&g.adjustConfirmed===true&&typeof g.adjustReason==="string"&&!!g.adjustReason.trim()}
-function gridStatus(p){
- const g=gridFor(p),r=readTheory(p),template=PRACTICE[p],situations=g.situations.map(situationStatus);
- const counts=situations.reduce((a,s)=>{for(const k of Object.keys(a))a[k]+=s.counts[k];return a},{A:0,B:0,C:0,D:0,unseen:0});
- const adjusted=adaptationActive(p,g),required=adjusted?1:minimum(p),standardComplete=!!template&&situations.length>=minimum(p)&&situations.every(s=>s.complete),complete=!!template&&situations.length>=required&&situations.every(s=>s.complete),reduced=adjusted&&complete&&!standardComplete,authorized=reduced&&g.adjustAuthorized===true,failed=situations.some(s=>s.failed),positive=!!r?.passed&&T.verified&&identityMatch(),practicePassed=complete&&!failed,possible=positive&&practicePassed;
- return {r,counts,situations,positive,complete,standardComplete,adjusted,required,reduced,authorized,failed,practicePassed,possible,template};
-}
 
+function situationStarted(sit){return !!(sit.title.trim()||sit.observations.trim()||sit.criteria.some(c=>c.mark||c.note.trim()))}
+function gridStatus(p){
+ const g=gridFor(p),r=readTheory(p),template=PRACTICE[p],situations=g.situations.map(sit=>({...situationStatus(sit),started:situationStarted(sit)}));
+ const counts=situations.reduce((a,s)=>{if(s.started)for(const k of Object.keys(a))a[k]+=s.counts[k];return a},{A:0,B:0,C:0,D:0,unseen:0});
+ const started=situations.filter(s=>s.started),completedCount=started.filter(s=>s.complete).length,required=template?1:0,referenceMinimum=template?.min||0;
+ const complete=!!template&&completedCount>=required&&started.every(s=>s.complete),standardComplete=complete&&completedCount>=referenceMinimum,reduced=!DEMO&&complete&&!standardComplete;
+ const failed=started.some(s=>s.failed),positive=!!r?.passed&&T.verified&&identityMatch(),practicePassed=complete&&!failed,possible=positive&&practicePassed;
+ return {r,counts,situations,positive,complete,standardComplete,required,referenceMinimum,reduced,startedCount:started.length,completedCount,failed,practicePassed,possible,template};
+}
 
 /* La clôture de l'évaluation n'est pas sa réussite. */
 function decisionReview(p){
@@ -203,12 +225,12 @@ function decisionReview(p){
  const failedObserved=g.situations.some((sit,i)=>!!sit.title.trim()&&s.situations[i].failed);
  if(s.r&&s.r.critical!==null&&!s.r.passed)reasons.push("Évaluation théorique non réussie ("+s.r.good+"/"+s.r.total+", "+s.r.pct+" %"+(s.r.critical>0?", erreur(s) critique(s) constatée(s)":"")+").");
  for(const [i,z] of s.situations.entries())if(z.failed)reasons.push("Situation "+(i+1)+(g.situations[i].title.trim()?" ("+g.situations[i].title.trim()+")":"")+" : "+z.counts.C+" C, "+z.counts.D+" D ; critères d’acceptation non satisfaits.");
- const negative=g.opinion==="defavorable",conditional=g.opinion==="favorable"&&s.reduced&&!s.authorized,stopped=negative&&!s.complete&&failedObserved,reasoned=reasons.length>0||explicitNotes.length>0;
+ const negative=g.opinion==="defavorable",conditional=false,stopped=negative&&!s.complete&&failedObserved,reasoned=reasons.length>0||explicitNotes.length>0;
  if(stopped)reasons.unshift("Évaluation pratique non intégralement renseignée : clôture défavorable sur un échec constaté. Les éléments non observés ne sont pas validés.");
  if(!t)blockers.push("grille pratique non disponible");
  else{
   if(!s.r||s.r.critical===null)blockers.push("résultat théorique manquant / non renseigné");
-  if(!s.complete&&!stopped)blockers.push(g.situations.length<s.required?"minimum de "+s.required+" situation(s) non atteint ; ajoutez une situation ou confirmez l’adaptation motivée":"compléter les intitulés et indicateurs");
+  if(!s.complete&&!stopped)blockers.push(!s.startedCount?"renseigner au moins une mise en situation":"compléter les intitulés et indicateurs des situations commencées");
   if(g.opinion==="incomplet")blockers.push("sélectionner l’avis du formateur");
   if(negative&&!reasoned)blockers.push("justifier l’avis défavorable (aucun échec objectif relevé)");
   if(g.opinion==="favorable"&&!s.possible)blockers.push("critères incompatibles avec l’avis favorable");
@@ -216,14 +238,14 @@ function decisionReview(p){
  return {closed:!!t&&blockers.length===0&&["favorable","defavorable"].includes(g.opinion),negative,conditional,stopped,reasons:[...reasons,...explicitNotes],blockers};
 }
 function reviewBadge(p){const d=decisionReview(p);return d.closed?status(d.negative?"Terminé · défavorable":d.conditional?"Terminé · sous réserve":"Terminé · favorable",d.negative?"bad":d.conditional?"wait":"good"):status("À compléter","wait")}
-function opinionLabel(p){const g=gridFor(p),s=gridStatus(p);return g.opinion==="favorable"&&s.reduced&&!s.authorized?"Favorable du formateur sous réserve du minimum de situations":ops[g.opinion]}
-function practiceResult(s){return !s.template?"Grille non fournie":s.failed?"Non réussie":s.practicePassed?(s.reduced?(s.authorized?"Situations satisfaisantes - adaptation déclarée autorisée":"Situations réalisées satisfaisantes - minimum de la grille non atteint"):"Réussie"):"À compléter"}
+function opinionLabel(p){return ops[gridFor(p).opinion]}
+function practiceResult(s){return !s.template?"Grille non fournie":s.failed?"Non réussie":s.practicePassed?(s.reduced?"Situations réalisées satisfaisantes - nombre inférieur au minimum de la grille":"Réussie"):"À compléter"}
 
 function trainerFields(){const i=T.identity;return '<div class="grid fields">'+field("nom","Nom",i.nom,"text",true)+field("prenom","Prénom",i.prenom,"text",true)+field("groupe","Classe / groupe",i.groupe,"text",true)+field("entreprise","Entreprise",i.entreprise,"text",true)+field("organisme","Organisme de formation",i.organisme,"text",true)+field("lieu","Lieu",i.lieu,"text",true)+field("formateur","Formateur / signataire",i.formateur,"text",true)+field("fonction","Fonction du signataire",i.fonction,"text",true)+field("dateTheorie","Date théorie",i.dateTheorie,"date",true)+field("datePratique","Date pratique",i.datePratique,"date",true)+field("dureeTheorie","Durée théorie (ex. 7 h)",i.dureeTheorie,"text",true)+field("dureePratique","Durée pratique (ex. 3 h)",i.dureePratique,"text",true)+field("stage","Intitulé de la formation",i.stage,"text",true)+field("datesFormation","Dates de la formation (facultatif : dates des évaluations par défaut)",i.datesFormation)+field("dureeFormation","Durée totale (facultatif : théorie + pratique par défaut)",i.dureeFormation)+'<label>Type de formation<select id="type"><option '+(i.type==="Initiale"?"selected":"")+'>Initiale</option><option '+(i.type==="Recyclage"?"selected":"")+'>Recyclage</option></select></label></div><label class="fields" style="display:block;margin-top:12px;font-size:14px;font-weight:700;color:var(--muted)">Attributions, environnement et restrictions envisagés par l’employeur<textarea id="perimetre" placeholder="Installations, domaine de tension, opérations, limites…">'+E(i.perimetre)+'</textarea></label>'}
 function renderTrainer(){
  A.innerHTML=hero("Espace formateur / V6",DEMO?"Test technique — dossier fictif":"Poste de travail du formateur",DEMO?"Une seule situation suffit pour tester la chaîne PDF. Aucun document ne constitue une attestation valable.":"Identifiez le stagiaire, importez la théorie, évaluez les situations et signez l’avis PROMEO.")+
  '<section class="panel"><div class="eyebrow">01 / Théorie</div><h2>Importer le PDF de l’apprenti</h2><div class="filebox"><label for="theoryFile"><b>Fichier PDF de théorie</b></label><input id="theoryFile" type="file" accept="application/pdf,.pdf"><p id="importMessage" role="status" class="'+(T.source?"success":"muted")+'" style="margin:9px 0 0">'+E(T.importMessage||"Aucun fichier importé.")+'</p></div>'+(T.file?'<div class="toolbar" style="margin-top:10px"><button id="openTheory" type="button">Ouvrir le PDF importé</button><button id="removeTheory" type="button" class="secondary">Retirer le PDF</button></div>':'')+
- '<p class="fine">Pour un PDF issu de la V5, les réponses intégrées sont recalculées. Le document d’origine reste annexé. Le fichier n’est ni authentifié ni envoyé vers un serveur.</p>'+(T.file?'<label class="checkline"><input id="verified" type="checkbox" '+(T.verified?"checked":"")+'>J’ai contrôlé le PDF original, l’identité, les résultats et les conditions de réalisation du test. Pour un PDF externe, j’ai vérifié les résultats reportés et les critères de réussite applicables.</label>':'')+'</section>'+
+ '<p class="fine">Pour un PDF BLACKOUT V5/V6, les réponses sont recalculées et les renseignements de l’apprenti disponibles sont importés. Vérifiez et complétez les informations dans Identité & périmètre. Le document d’origine reste annexé. Le fichier n’est ni authentifié ni envoyé vers un serveur.</p>'+(T.file?'<label class="checkline"><input id="verified" type="checkbox" '+(T.verified?"checked":"")+'>J’ai contrôlé le PDF original, l’identité, les informations de formation, les résultats et les conditions de réalisation du test. Pour un PDF externe, j’ai vérifié les résultats reportés et les critères de réussite applicables.</label>':'')+'</section>'+
  '<section class="panel"><div class="eyebrow">02 / Identification</div><h2>Informations du dossier</h2>'+trainerFields()+'</section><section class="panel"><div class="eyebrow">03 / Périmètre</div><h2>Symboles faisant l’objet de l’évaluation</h2><p class="muted">Cochez les symboles à évaluer. Les grilles Word fournies sont utilisées pour les symboles couverts. Les autres restent à compléter (aucun avis favorable possible). Chaque indice BE Essai ou BE Mesurage exige deux situations propres en mode réel.</p>'+profilePicker(T.profiles,DEMO?Object.keys(PRACTICE):null)+'<label class="fields" style="display:block;font-size:14px;font-weight:700;margin-top:14px">Titre(s) demandé(s) par l’entreprise<input id="titresDemandes" maxlength="400" value="'+E(T.identity.titresDemandes)+'" placeholder="'+E(T.profiles.map(get).join(", "))+'"></label><p class="fine">Si ce champ reste vide, les symboles cochés sont repris comme demande de l’entreprise. Si la demande est différente, précisez-la ici : aucun avis favorable global ne sera déduit à tort.</p></section><div id="practiceArea"></div>'+
  '<section class="panel"><div class="eyebrow">05 / Dossier final</div><h2>Générer l’avis après formation</h2><div class="info">Modèle PROMEO « Avis après formation » fourni : titre(s) demandé(s), avis favorable / défavorable, autre proposition, champ d’application et signature. Les évaluations restent annexées au dossier complet.</div><div id="avisPreview" class="notice" role="status"></div><label class="fields" style="font-size:14px;font-weight:700;color:var(--muted)">Observations globales / restrictions<textarea id="scopeNotes" placeholder="Précisions, limites d’activité, compléments de formation, contexte…">'+E(T.scopeNotes)+'</textarea></label><div class="notice">'+E(pilot)+'</div><label class="checkline"><input id="reviewed" type="checkbox" '+(T.reviewed?"checked":"")+'>Je confirme avoir relu le dossier, les titres demandés par l’entreprise, les dates, le champ d’application proposé et les avis. Les informations correspondent à mes observations. Je signe ensuite l’avis en connaissance de cause.</label>'+signatureMarkup()+'<p id="error" role="alert" class="error"></p><div class="sticky-summary row"><span id="overallStatus" class="muted"></span><div class="toolbar"><button id="resetTrainer" class="secondary">Nouveau dossier</button><button id="generateAvis" class="secondary">Télécharger l’avis PROMEO seul</button><button id="generate" class="primary">Générer le dossier PDF complet</button></div></div></section>'+footer();
  $("theoryFile").onchange=async e=>{const file=e.target.files?.[0];if(file&&!DEMO)await importPDF(file)};
@@ -245,13 +267,13 @@ async function importPDF(file){
  try{
   if(file.size>30*1024*1024)throw Error("PDF trop volumineux : limite 30 Mo.");const {PDFDocument}=requirePdf(),bytes=new Uint8Array(await file.arrayBuffer()),pdf=await PDFDocument.load(bytes);
   if(!pdf.getPageCount())throw Error("PDF vide.");let source=null,message;
-  const packet=decodePacket(pdf.getSubject());if(packet){source=validatePacket(packet);message="PDF V5 reconnu · "+pdf.getPageCount()+" page(s) · "+source.packet.id+" · résultats recalculés."}
+  const packet=decodePacket(pdf.getSubject());if(packet){source=validatePacket(packet);message="PDF BLACKOUT reconnu · "+pdf.getPageCount()+" page(s) · "+source.packet.id+" · résultats recalculés et informations disponibles préremplies."}
   else message="PDF externe importé · "+pdf.getPageCount()+" page(s). Renseignez manuellement les résultats pour chaque symbole, puis contrôlez-les.";
   const replace=T.file||T.profiles.length||Object.values(T.practice).some(g=>g.situations.some(s=>s.title||s.criteria.some(c=>c.mark)));
   if(replace&&!confirm("Remplacer la théorie et repartir sur un nouveau dossier pratique ? Les observations et avis en cours seront effacés.")){renderTrainer();return}
-  if(replace){Object.assign(T.identity,{entreprise:"",perimetre:"",titresDemandes:"",datesFormation:"",dureeFormation:"",datePratique:today(),dureeTheorie:"",dureePratique:""});T.scopeNotes=""}
+  if(replace){Object.assign(T.identity,{entreprise:"",lieu:"",organisme:"PROMEO",dateTheorie:today(),perimetre:"",titresDemandes:"",datesFormation:"",dureeFormation:"",datePratique:today(),dureeTheorie:"",dureePratique:""});T.scopeNotes=""}
  v6Undo=null;v6Profile=null;v6Situation={};T.file={bytes,name:file.name,pages:pdf.getPageCount()};T.source=source;T.external={};T.practice={};T.profiles=source?[...source.packet.profiles]:[];T.verified=false;invalidateSignatureReview();T.importMessage=message;
-  if(source){Object.assign(T.identity,source.packet.identity,{dateTheorie:source.packet.date.slice(0,10)})}else{Object.assign(T.identity,{nom:"",prenom:"",groupe:""})}
+  if(source){applyStudentIdentity(source,T.identity)}else{Object.assign(T.identity,{nom:"",prenom:"",groupe:""})}
   renderTrainer();
  }catch(e){T.importMessage="Import impossible : "+e.message;if($("importMessage"))$("importMessage").textContent=T.importMessage;showError(T.importMessage)}
 }
@@ -260,10 +282,73 @@ function countText(counts){return ["A","B","C","D"].map(k=>k+" : "+counts[k]).jo
 function situationBadge(s){return s.failed?status("Critères non satisfaits","bad"):s.pass?status("Critères satisfaits","good"):status("À compléter","wait")}
 function practiceBadge(s){return !s.template?status("Grille manquante","wait"):s.failed?status("Pratique non réussie","bad"):s.practicePassed?status(s.reduced?"Situations réalisées satisfaisantes":"Pratique réussie",s.reduced?"wait":"good"):status("Pratique à compléter","wait")}
 function markButtons(p,n,c,i){return '<div class="mark-buttons" role="radiogroup" aria-label="Notation du critère '+(i+1)+'">'+Object.entries(marks).map(([k,v])=>'<label class="mark-button mark-'+k+'" title="'+E(k+" : "+v)+'"><input type="radio" name="mark-'+E(p)+'-'+n+'-'+i+'" value="'+k+'" data-mark="'+i+'" '+(c.mark===k?"checked":"")+'><span>'+k+'</span></label>').join("")+'<button type="button" class="clear-mark" data-clear-mark="'+i+'" title="Effacer la notation" aria-label="Effacer la notation du critère '+(i+1)+'">×</button></div>'}
-function adjustmentMarkup(p,g,t){
- if(DEMO||!t||t.min<=1)return "";
- return '<div class="v6-adjust"><b>Nombre de situations évaluées</b><p class="fine">La grille d’origine prévoit '+t.min+' situations. Tu peux clôturer ce dossier avec au moins une situation intégralement évaluée, en documentant l’écart. Sans validation déclarée du référent, un avis favorable reste sous réserve et le symbole n’est pas proposé à l’employeur.</p><label class="checkline"><input type="checkbox" data-adjust-confirm '+(g.adjustConfirmed?"checked":"")+'>Clôturer avec les situations réalisées (minimum adapté à 1)</label><div data-adjust-fields '+(g.adjustConfirmed?"":"hidden")+'><label class="fields">Motif de l’adaptation *<textarea data-adjust-reason maxlength="500" placeholder="Indiquer le motif réel de la réduction du nombre de situations.">'+E(g.adjustReason)+'</textarea></label><label class="checkline"><input type="checkbox" data-adjust-authorized '+(g.adjustAuthorized?"checked":"")+'>Je confirme que l’adaptation a été validée par le référent habilitation de l’organisme.</label><p class="fine">Ne cochez cette dernière case que si cette validation a réellement été obtenue. L’écart et le motif figurent dans le dossier final.</p></div><p data-adjust-status class="fine"></p></div>';
+
+
+function commentChoices(field){
+ const el=field.closest("[data-profile]"),p=el?.dataset.profile,g=p?gridFor(p):null,s=p?gridStatus(p):null;
+ const box=field.closest("[data-situation]"),si=box?Number(box.dataset.situation):-1,sit=g&&si>=0?g.situations[si]:null,z=s&&si>=0?s.situations[si]:null;
+ const choices=[];
+ const add=(label,value)=>{if(value&&!choices.some(c=>c.value===value))choices.push({label,value})};
+ if(field.hasAttribute("data-note")&&sit){
+  const c=sit.criteria[Number(field.dataset.note)],m=c?.mark;
+  if(m==="A")add("A — sans erreur","Critère réalisé sans erreur constatée.");
+  if(m==="B")add("B — écart acceptable","Écart acceptable relevé sur ce critère.");
+  if(m==="C")add("C — erreur majeure","Erreur majeure constatée sur ce critère. Une reprise est nécessaire.");
+  if(m==="D")add("D — erreur grave","Erreur grave constatée sur ce critère. Critères d’acceptation non satisfaits.");
+  add("Consigne maîtrisée","Consigne comprise et appliquée.");
+  add("Méthode à renforcer","Méthode à renforcer avant une nouvelle évaluation.");
+  add("Analyse des risques à renforcer","Analyse préalable des risques à renforcer.");
+  add("Vérifications à améliorer","Vérifications et contrôles à améliorer.");
+ }else if(field.dataset.field==="reserve"||field.dataset.avis==="avisIndications"||field.id==="perimetre"){
+  if(s?.r&&!s.r.passed&&s.r.critical!==null)add("Échec théorique (résultat calculé)","Critères théoriques non atteints : "+s.r.good+"/"+s.r.total+" ("+s.r.pct+" %). Une nouvelle évaluation est nécessaire.");
+  if(s?.failed)add("Échec pratique (résultat calculé)","Au moins une situation ne satisfait pas aux critères d’acceptation. Complément de formation et nouvelle évaluation pratique recommandés.");
+  add("Complément de formation","Un complément de formation ciblé est nécessaire avant une nouvelle évaluation.");
+  add("Nouvelle mise en situation","Prévoir une nouvelle mise en situation pour vérifier les compétences à renforcer.");
+  add("Respect du champ d’application","Limiter les opérations au champ d’application défini par l’employeur et aux consignes de sécurité applicables.");
+  add("Analyse des risques","Renforcer l’analyse préalable des risques et le choix des mesures de prévention.");
+  add("Mise en sécurité","Reprendre les procédures de mise en sécurité et les vérifications associées.");
+  add("Aucune restriction complémentaire constatée","Aucune restriction complémentaire constatée dans le cadre des situations évaluées.");
+ }else{
+  if(z?.started)add("Bilan de la situation (notes réelles)","Bilan des indicateurs : "+z.counts.A+" A, "+z.counts.B+" B, "+z.counts.C+" C, "+z.counts.D+" D ; "+z.counts.unseen+" non renseigné(s)."+(z.failed?" Critères d’acceptation non satisfaits.":z.pass?" Critères d’acceptation satisfaits pour cette situation.":" Évaluation incomplète."));
+  if(s&&!z)add("Bilan pratique (résultats réels)",s.completedCount+" situation(s) entièrement évaluée(s) ; "+s.situations.filter(x=>x.pass).length+" satisfaisante(s). "+(s.failed?"Au moins une situation non réussie.":""));
+  if(s?.r&&s.r.critical!==null&&!z)add("Bilan théorique (résultat réel)","Résultat théorique : "+s.r.good+"/"+s.r.total+" ("+s.r.pct+" %), "+(s.r.passed?"critères de réussite satisfaits.":"critères de réussite non satisfaits."));
+  if(field.id==="scopeNotes")add("Synthèse des évaluations (résultats réels)",T.profiles.map(id=>{const v=gridStatus(id);return get(id)+" : "+v.completedCount+" situation(s) entièrement évaluée(s), avis "+ops[gridFor(id).opinion].toLowerCase()}).join(" ; ")+".");
+  add("Comportement adapté","Comportement adapté face aux risques électriques observés.");
+  add("Consignes respectées","Consignes respectées et gestes maîtrisés dans les situations évaluées.");
+  add("Bonne identification des risques","Risques électriques identifiés et mesures de prévention adaptées.");
+  add("Analyse des risques à consolider","L’analyse préalable des risques doit être consolidée.");
+  add("Mise en sécurité à renforcer","La mise en sécurité et les vérifications doivent être renforcées.");
+  add("Communication à améliorer","Les consignes, la communication et le compte rendu doivent être améliorés.");
+  add("Reprise nécessaire","Un complément de formation et une nouvelle évaluation des points non maîtrisés sont recommandés.");
+ }
+ return choices;
 }
+function installCommentChoices(root){
+ if(!root)return;
+ for(const field of root.querySelectorAll('textarea[data-field],textarea[data-sit-observations],input[data-note],#scopeNotes,#perimetre,textarea[data-avis="avisIndications"]')){
+  if(field.dataset.presetsReady)continue;field.dataset.presetsReady="1";
+  const wrap=document.createElement("div");wrap.className="v6-comment-tools";
+  const select=document.createElement("select");select.className="v6-comment-select";select.setAttribute("aria-label","Ajouter un commentaire type");select.title="Sélectionnez un commentaire correspondant à votre constat ; le texte reste modifiable.";
+  const hint=document.createElement("small");hint.className="fine";hint.setAttribute("role","status");
+  let choices=[];
+  const populate=()=>{choices=commentChoices(field);select.replaceChildren();const placeholder=document.createElement("option");placeholder.value="";placeholder.textContent="＋ Ajouter un commentaire type…";select.append(placeholder);choices.forEach((c,i)=>{const opt=document.createElement("option");opt.value=String(i);opt.textContent=c.label;select.append(opt)})};
+  populate();select.addEventListener("focus",populate);select.addEventListener("pointerdown",()=>{if(document.activeElement!==select)populate()});
+  select.onchange=()=>{if(select.value==="")return;const c=choices[Number(select.value)];select.value="";if(!c)return;
+   const old=field.value.trimEnd(),separator=field.tagName==="TEXTAREA"?"\n":" ",next=old?old+separator+c.value:c.value;
+   if(field.maxLength>=0&&next.length>field.maxLength){hint.textContent="Commentaire trop long : raccourcissez le texte existant ou saisissez votre observation.";return}
+   field.value=next;field.dispatchEvent(new Event("input",{bubbles:true}));hint.textContent="Commentaire ajouté ; vous pouvez le modifier.";
+  };
+  wrap.append(select,hint);
+  const label=field.closest("label");
+  if(label&&label.contains(field)){const group=document.createElement("div");group.className="v6-comment-field";label.before(group);group.append(label,wrap)}else field.after(wrap);
+ }
+}
+
+function situationCountMarkup(p,g,t){
+ if(!t)return "";
+ return '<div class="v6-adjust"><b>Nombre de mises en situation : au choix du formateur</b><p class="fine">La grille fournie indique '+t.min+' situation(s) minimum. Une situation entièrement évaluée suffit pour clôturer le dossier dans l’application. Ajoutez ou supprimez les situations selon votre évaluation. Les situations laissées entièrement vides ne bloquent pas le dossier. Le nombre réalisé et l’écart éventuel au minimum d’origine sont reportés automatiquement dans le PDF.</p><p data-count-status class="fine" role="status"></p></div>';
+}
+
 function renderPractices(){
  const area=$("practiceArea");if(!area)return;
  if(!T.profiles.length){area.innerHTML='<section class="panel"><div class="eyebrow">04 / Pratique</div><h2>Aucun symbole sélectionné</h2><p class="muted">Sélectionnez un ou plusieurs symboles dans Identité et périmètre pour afficher les grilles.</p><button class="secondary" id="goIdentity">Choisir les symboles</button></section>';$("goIdentity").onclick=()=>setStage("identity");updateOverall();return}
@@ -272,7 +357,7 @@ function renderPractices(){
  const desc=!r?"Résultat théorique absent":theoryLabel(r)+" · "+r.good+"/"+r.total+" ("+r.pct+" %)"+(r.critical===null?" · critiques à vérifier":" · critiques : "+r.critical);
  let body="";
  if(t){
- body='<details class="source-objectives"><summary>Objectifs de la grille '+E(t.source)+' ('+t.objectives.length+')</summary><ul>'+t.objectives.map(o=>'<li>'+E(o)+'</li>').join("")+'</ul></details><div class="info"><b>'+minimum(p)+' mise(s) en situation minimum</b> · '+E(PRACTICE_RULE)+(DEMO?" · Test uniquement : minimum réel "+t.min:"")+'</div>'+adjustmentMarkup(p,g,t)+'<div class="mark-legend">'+Object.entries(marks).map(([k,v])=>'<span><b class="legend-'+k+'">'+k+'</b> '+E(v)+'</span>').join("")+'</div>'+
+ body='<details class="source-objectives"><summary>Objectifs de la grille '+E(t.source)+' ('+t.objectives.length+')</summary><ul>'+t.objectives.map(o=>'<li>'+E(o)+'</li>').join("")+'</ul></details><div class="info"><b>'+'Évaluation des situations réalisées</b> · '+E(PRACTICE_RULE)+'</div>'+situationCountMarkup(p,g,t)+'<div class="mark-legend">'+Object.entries(marks).map(([k,v])=>'<span><b class="legend-'+k+'">'+k+'</b> '+E(v)+'</span>').join("")+'</div>'+
  g.situations.map((sit,si)=>'<article class="situation" data-situation="'+si+'"><div class="row"><h3>Mise en situation n°'+(si+1)+'</h3><div data-sit-badge>'+situationBadge(situationStatus(sit))+'</div></div><label class="fields" style="display:block;font-size:14px;font-weight:700">Intitulé de la mise en situation *<input data-title maxlength="240" placeholder="Intitulé de la situation réalisée" value="'+E(sit.title)+'"></label><div class="practice-indicators"><div class="practice-table-head"><span>Indicateurs</span><span>Notation A / B / C / D</span></div>'+sit.criteria.map((c,i)=>'<div class="criterion"><div><strong>'+E(String(i+1)+". "+c.text)+'</strong><details class="criterion-note" '+(c.note?"open":"")+'><summary>'+(c.note?"Observation saisie":"Ajouter une observation")+'</summary><input data-note="'+i+'" placeholder="Observation facultative" maxlength="300" value="'+E(c.note)+'" aria-label="Observation du critère '+(i+1)+'"></details></div>'+markButtons(p,si,c,i)+'</div>').join("")+'</div><div class="grade-summary" data-sit-summary>'+E(countText(situationStatus(sit).counts))+'</div><label class="fields" style="display:block;font-size:14px;font-weight:700">Observations de la situation<textarea data-sit-observations placeholder="Observations facultatives">'+E(sit.observations)+'</textarea></label>'+'<button type="button" class="secondary remove-situation" data-remove-situation="'+si+'">Supprimer cette mise en situation</button>'+'</article>').join("")+
  (g.situations.length===0?'<div class="notice">Aucune situation renseignée. Ajoutez une mise en situation pour poursuivre.</div>':'')+'<button type="button" data-add-situation class="secondary">+ Ajouter une mise en situation</button>';
  if(p==="B2V_Essai")body='<div class="notice">Grille pratique B2V Essai distincte de B2V et BE Essai. Aucun QCM V5 spécifique disponible ; utilisez un PDF théorique externe couvrant explicitement B2V Essai et renseignez ses résultats.</div>'+body;
@@ -293,30 +378,25 @@ function renderPractices(){
     box.querySelectorAll("[data-mark]").forEach(x=>x.onchange=()=>{if(x.checked){sit.criteria[Number(x.dataset.mark)].mark=x.value;change()}});
     box.querySelectorAll("[data-clear-mark]").forEach(x=>x.onclick=()=>{const j=Number(x.dataset.clearMark);sit.criteria[j].mark="";box.querySelectorAll('[data-mark="'+j+'"]').forEach(r=>r.checked=false);change()});
     box.querySelectorAll("[data-note]").forEach(x=>x.oninput=()=>{sit.criteria[Number(x.dataset.note)].note=x.value;commentChange()});
-    const remove=box.querySelector("[data-remove-situation]");if(remove)remove.onclick=()=>{const remaining=g.situations.length-1,missing=Math.max(0,minimum(p)-remaining),hasData=!!(sit.title.trim()||sit.observations.trim()||sit.criteria.some(c=>c.mark||c.note.trim()));const message="Supprimer la mise en situation n°"+(si+1)+" de "+get(p)+" ?"+(hasData?"\nLes notes et observations seront retirées. Vous pourrez annuler la dernière suppression tant que le dossier reste ouvert.":"")+(missing?"\nIl manquera "+missing+" situation(s) pour atteindre le minimum de la grille. Une adaptation motivée reste possible dans ce même dossier.":"");if(confirm(message)){const removed={p,index:si,situation:sit,grid:g};if(removeSituation(p,si)){v6Undo=removed;v6Situation[p]=Math.max(0,Math.min(si,g.situations.length-1));renderPractices()}}};
+    const remove=box.querySelector("[data-remove-situation]");if(remove)remove.onclick=()=>{const hasData=!!(sit.title.trim()||sit.observations.trim()||sit.criteria.some(c=>c.mark||c.note.trim()));const message="Supprimer la mise en situation n°"+(si+1)+" de "+get(p)+" ?"+(hasData?"\nLes notes et observations seront retirées. Vous pourrez annuler la dernière suppression tant que le dossier reste ouvert.":"");if(confirm(message)){const removed={p,index:si,situation:sit,grid:g};if(removeSituation(p,si)){v6Undo=removed;v6Situation[p]=Math.max(0,Math.min(si,g.situations.length-1));renderPractices()}}};
   });
   const add=el.querySelector("[data-add-situation]");if(add)add.onclick=()=>{if(g.situations.length>=12)return alert("12 situations maximum.");g.situations.push(newSituation(p));v6Situation[p]=g.situations.length-1;g.opinion="incomplet";invalidate();renderPractices()};
-  const ac=el.querySelector("[data-adjust-confirm]"),ar=el.querySelector("[data-adjust-reason]"),aa=el.querySelector("[data-adjust-authorized]");
-  if(ac)ac.onchange=()=>{g.adjustConfirmed=ac.checked;if(!ac.checked){g.adjustAuthorized=false;if(aa)aa.checked=false}el.querySelector("[data-adjust-fields]").hidden=!ac.checked;change()};
-  if(ar)ar.oninput=()=>{g.adjustReason=ar.value;g.adjustAuthorized=false;if(aa)aa.checked=false;commentChange()};
-  if(aa)aa.onchange=()=>{g.adjustAuthorized=aa.checked;commentChange()};
   el.querySelectorAll("[data-field]").forEach(x=>x.oninput=()=>{g[x.dataset.field]=x.value;commentChange()});
   el.querySelectorAll("[data-avis]").forEach(x=>x.oninput=()=>{g[x.dataset.avis]=x.value;invalidate();updateOverall()});
   el.querySelector("[data-opinion]").onchange=e=>{const v=e.target.value;g.opinion=v==="favorable"&&!gridStatus(p).possible?"incomplet":v;invalidate();refreshPractice(p,el)};
   el.querySelectorAll("[data-manual]").forEach(x=>x.onchange=()=>{T.external[p]??={};T.external[p][x.dataset.manual]=x.dataset.manual==="critical"?x.value:x.value===""?null:Number(x.value);T.verified=false;if($("verified"))$("verified").checked=false;g.opinion="incomplet";invalidate();renderPractices()});
   refreshPractice(p,el);
- });mountPracticeTabs();updateOverall();
+ });installCommentChoices(area);mountPracticeTabs();updateOverall();
 }
-function refreshPractice(p,el){const g=gridFor(p),s=gridStatus(p),op=el.querySelector("[data-opinion]");if(!s.possible&&g.opinion==="favorable")g.opinion="incomplet";op.querySelector('option[value="favorable"]').disabled=!s.possible;op.querySelector('option[value="favorable"]').textContent=s.reduced&&!s.authorized?"Favorable sous réserve":"Favorable";op.value=g.opinion;
- const adjust=el.querySelector("[data-adjust-status]");if(adjust)adjust.textContent=g.adjustConfirmed&&!g.adjustReason.trim()?"Renseignez le motif pour appliquer l’adaptation.":s.adjusted?"Minimum appliqué : 1. Minimum de la grille d’origine : "+minimum(p)+(s.reduced&&!s.authorized?" — proposition à l’employeur suspendue, faute de validation déclarée.":s.authorized?" — adaptation déclarée validée.":""):"Minimum de la grille d’origine : "+minimum(p)+".";
-
+function refreshPractice(p,el){const g=gridFor(p),s=gridStatus(p),op=el.querySelector("[data-opinion]");if(!s.possible&&g.opinion==="favorable")g.opinion="incomplet";op.querySelector('option[value="favorable"]').disabled=!s.possible;op.querySelector('option[value="favorable"]').textContent="Favorable";op.value=g.opinion;
+ const count=el.querySelector("[data-count-status]");if(count)count.textContent=s.completedCount+" situation(s) entièrement évaluée(s) · "+s.startedCount+" commencée(s) · minimum indiqué dans la grille : "+s.referenceMinimum+". "+(s.completedCount<s.referenceMinimum?"Écart de nombre signalé dans le PDF, sans blocage supplémentaire.":"");
  const review=el.querySelector("[data-review-status]"),d=decisionReview(p);if(review){review.innerHTML=reviewBadge(p)+(d.closed&&d.negative?(d.stopped?'<p class="fine">Échec constaté : la clôture est défavorable, les autres éléments restent non évalués.</p>':'<p class="fine">L’évaluation est clôturée avec un avis défavorable, sans validation du symbole.</p>'):(d.blockers.length?'<p class="fine">'+E(d.blockers.join(" · "))+'</p>':""))}
  el.querySelectorAll("[data-situation]").forEach(box=>{const z=s.situations[Number(box.dataset.situation)];box.querySelector("[data-sit-badge]").innerHTML=situationBadge(z);box.querySelector("[data-sit-summary]").textContent=countText(z.counts)});
- el.querySelector("[data-summary]").innerHTML='<span>Situations satisfaites : <b>'+s.situations.filter(z=>z.pass).length+'/'+g.situations.length+'</b></span>'+practiceBadge(s)+(s.template&&g.situations.length<s.required?status("Minimum non atteint : "+(s.required-g.situations.length)+" situation(s) manquante(s)","bad"):s.reduced?status("Écart au minimum d’origine", "wait"):"")+(s.practicePassed&&!s.positive?status("Théorie à contrôler","wait"):"");updateOverall()}
+ el.querySelector("[data-summary]").innerHTML='<span>Situations satisfaites : <b>'+s.situations.filter(z=>z.pass).length+'/'+s.startedCount+'</b></span>'+practiceBadge(s)+(s.template&&!s.startedCount?status("Aucune situation évaluée","wait"):s.reduced?status("Nombre inférieur au minimum de la grille","wait"):"")+(s.practicePassed&&!s.positive?status("Théorie à contrôler","wait"):"");updateOverall()}
 
 
 function avisProfiles(){
- return T.profiles.map(id=>{const g=gridFor(id),s=gridStatus(id);return {id,name:get(id),domain:P[id].domain,opinion:g.opinion==="favorable"&&!s.possible?"incomplet":g.opinion==="favorable"&&s.reduced&&!s.authorized?"reserve":g.opinion,tension:g.avisTension.trim(),ouvrages:g.avisOuvrages.trim(),indications:g.avisIndications.trim()}});
+ return T.profiles.map(id=>{const g=gridFor(id),s=gridStatus(id);const opinion=g.opinion==="favorable"&&!s.possible?"incomplet":g.opinion;const gap=!DEMO&&s.template&&s.completedCount<s.referenceMinimum?"Nombre de situations réalisées : "+s.completedCount+"/"+s.referenceMinimum+" (minimum de la grille non atteint).":"";return {id,name:get(id),domain:P[id].domain,opinion,tension:g.avisTension.trim(),ouvrages:g.avisOuvrages.trim(),indications:[g.avisIndications.trim(),gap].filter(Boolean).join(" ")}});
 }
 function requestedTitles(){return T.identity.titresDemandes.trim()||T.profiles.map(get).join(", ")}
 function avisStatus(){
@@ -339,7 +419,7 @@ function avisPayload(signature){
  const duration=i.dureeFormation.trim()||"Théorie : "+i.dureeTheorie+" + pratique : "+i.dureePratique;
  const comments=[T.scopeNotes.trim(),i.perimetre.trim()].filter(Boolean);
  for(const id of T.profiles){const g=gridFor(id),s=gridStatus(id);
-  if(s.reduced)comments.push(get(id)+" : adaptation déclarée par le formateur : "+s.situations.filter(z=>z.complete).length+" situation(s) réalisée(s) sur "+minimum(id)+" prévue(s) par la grille. Motif : "+g.adjustReason.trim()+". "+(s.authorized?"Validation du référent déclarée obtenue par le formateur.":"Validation du référent non déclarée ; aucun symbole n’est proposé sur cette seule évaluation réduite en cas d’avis favorable sous réserve."));
+  if(s.template)comments.push(get(id)+" : "+s.completedCount+" situation(s) entièrement évaluée(s) ; minimum indiqué par la grille fournie : "+s.referenceMinimum+"."+(s.completedCount<s.referenceMinimum?" Nombre inférieur au minimum de la grille ; avis du formateur exprimé sur les situations réalisées.":""));
   if(g.opinion==="defavorable"){const reasons=decisionReview(id).reasons;comments.push(get(id)+" : "+reasons.join(" / "))}
   else if(g.reserve.trim())comments.push(get(id)+" : "+g.reserve.trim());
  }
@@ -371,7 +451,7 @@ async function trainerPDF(onlyAvis=false,returnBytes=false,draft=false){
 
  for(const p of T.profiles){
  const g=gridFor(p),s=gridStatus(p),r=s.r,t=s.template;b.newPage();b.heading("04 / Grille pratique - "+get(p));b.text("Source : "+(t?t.source+" - grille Word fournie":"Grille non fournie"),{weight:true});b.text("Théorie : "+(r?r.good+"/"+r.total+" ("+r.pct+" %) / "+theoryLabel(r):"Non renseignée")+" ; contrôle formateur : "+(T.verified?"déclaré effectué":"non confirmé"),{size:9});
- if(t){b.text("Minimum de la grille d’origine : "+t.min+(DEMO?" | TEST TECHNIQUE : minimum simulé 1":"")+" | "+PRACTICE_RULE,{weight:true});if(s.reduced)b.text("Adaptation : "+s.situations.filter(z=>z.complete).length+"/"+t.min+" situations réalisées. Motif : "+g.adjustReason+" ; validation du référent : "+(s.authorized?"déclarée obtenue":"non déclarée")+".",{weight:true});b.text("A : sans erreur ; B : erreur acceptable ; C : erreur majeure ; D : erreur grave.",{size:9});b.section("Objectifs des mises en situations pratiques");for(const objective of t.objectives)b.text("- "+objective,{size:9,gap:3});
+ if(t){b.text("Minimum indiqué dans la grille d’origine : "+t.min+" | "+PRACTICE_RULE,{weight:true});b.text("Situations entièrement évaluées : "+s.completedCount+" ; situations commencées : "+s.startedCount+"."+(s.completedCount<t.min?" Nombre inférieur au minimum de la grille. Avis du formateur fondé sur les situations réalisées ; conformité à ce minimum non établie.":""),{weight:true});b.text("A : sans erreur ; B : erreur acceptable ; C : erreur majeure ; D : erreur grave.",{size:9});b.section("Objectifs des mises en situations pratiques");for(const objective of t.objectives)b.text("- "+objective,{size:9,gap:3});
  if(p==="BC")b.text("Note : l'objectif et l'indicateur relatifs à la consignation diffèrent dans le document source. Formulations conservées ; à vérifier avec le référent.",{size:9});
  for(let j=0;j<g.situations.length;j++){const sit=g.situations[j],z=s.situations[j];b.newPage();b.heading(get(p)+" - Mise en situation n°"+(j+1));b.text("Intitulé : "+(sit.title||"Non renseigné"),{weight:true});b.text(PRACTICE_RULE,{size:9});for(let k=0;k<sit.criteria.length;k++){const c=sit.criteria[k];b.text((k+1)+". "+c.text,{weight:true,size:10,gap:2});b.text("Notation : "+(marks[c.mark]?c.mark+" - "+marks[c.mark]:"Non renseignée")+(c.note?"  |  "+c.note:""),{size:9,gap:6})}b.text(countText(z.counts),{weight:true});b.text("Bilan de la situation : "+(z.failed?"Critères non satisfaits":z.pass?"Critères satisfaits":"À compléter"),{weight:true});b.text("Observations : "+(sit.observations||"Non renseignées"),{size:9});}
  }else b.text("Aucun avis favorable autorisé tant que la grille correspondant au symbole n'est pas fournie.",{weight:true});
@@ -437,7 +517,7 @@ function mountWorkspace(){
  $("v6RestoreDraft").onclick=()=>restoreDraft();
  $("v6EraseDraft").onclick=()=>eraseDraft();
  $("v6NewDraft").onclick=()=>newTrainerDraft();
- installDemoControls(aside);setStage(v6Stage,false);draftLabel();
+ installDemoControls(aside);installCommentChoices(A);setStage(v6Stage,false);draftLabel();
 }
 function refreshWorkspace(){
  if(!$("v6Name"))return;
@@ -446,7 +526,7 @@ function refreshWorkspace(){
  const missing=missingItems(),completed={identity:!missing.some(x=>x[0]==="identity"),theory:!missing.some(x=>x[0]==="theory"),practice:T.profiles.length>0&&!missing.some(x=>x[0]==="practice"),final:!missing.length&&!!validSignature("trainer")};
  const count=Object.values(completed).filter(Boolean).length;$("v6Percent").textContent=count+"/4";$("v6Progress").style.width=count*25+"%";
  A.querySelectorAll("[data-step-state]").forEach(el=>{const id=el.dataset.stepState;const negative=id==="practice"&&completed[id]&&T.profiles.some(p=>decisionReview(p).negative),conditional=id==="practice"&&completed[id]&&T.profiles.some(p=>decisionReview(p).conditional);el.textContent=completed[id]?(negative?"Terminé · défavorable(s)":conditional?"Terminé · sous réserve":"Terminé"):id===v6Stage?"En cours":"À compléter";el.parentElement.parentElement.classList.toggle("step-done",completed[id]&&!negative&&!conditional);el.parentElement.parentElement.classList.toggle("step-negative",negative);el.parentElement.parentElement.classList.toggle("step-conditional",conditional)});
- $("v6SymbolSummary").innerHTML=T.profiles.length?T.profiles.map(p=>{const g=gridFor(p),s=gridStatus(p),d=decisionReview(p),done=s.situations.filter(z=>z.complete).length,total=Math.max(g.situations.length,s.required,1);return '<button type="button" class="symbol-summary" data-go-symbol="'+E(p)+'"><span><b>'+E(get(p))+'</b><small>'+done+'/'+total+' situations renseignées</small></span><span class="status '+(d.closed?(d.negative?"bad":d.conditional?"wait":"good"):"wait")+'">'+(d.closed?(d.negative?"Défavorable":d.conditional?"Sous réserve":"Terminé"):"À faire")+'</span></button><div class="progress mini"><i style="width:'+Math.min(100,done/total*100)+'%"></i></div>'}).join(""):'<p class="fine">Les symboles apparaîtront ici après sélection.</p>';
+ $("v6SymbolSummary").innerHTML=T.profiles.length?T.profiles.map(p=>{const g=gridFor(p),s=gridStatus(p),d=decisionReview(p),done=s.situations.filter(z=>z.complete).length,total=Math.max(s.startedCount,1);return '<button type="button" class="symbol-summary" data-go-symbol="'+E(p)+'"><span><b>'+E(get(p))+'</b><small>'+done+'/'+total+' situations renseignées</small></span><span class="status '+(d.closed?(d.negative?"bad":d.conditional?"wait":"good"):"wait")+'">'+(d.closed?(d.negative?"Défavorable":d.conditional?"Sous réserve":"Terminé"):"À faire")+'</span></button><div class="progress mini"><i style="width:'+Math.min(100,done/total*100)+'%"></i></div>'}).join(""):'<p class="fine">Les symboles apparaîtront ici après sélection.</p>';
  $("v6SymbolSummary").querySelectorAll("[data-go-symbol]").forEach(b=>b.onclick=()=>{v6Profile=b.dataset.goSymbol;setStage("practice");refreshPracticeTabs()});
  $("v6Checklist").innerHTML='<h4>À compléter</h4>'+(missing.length?missing.map(([id,msg,p])=>'<button type="button" class="check-task" data-go-step="'+id+'" data-go-p="'+E(p||"")+'"><span aria-hidden="true">○</span> '+E(msg)+'</button>').join(""):validSignature("trainer")?'<p class="success">Dossier prêt à exporter.</p>':'<button type="button" class="check-task" data-go-step="final">○ Relire et signer l’avis</button>');
  $("v6Checklist").querySelectorAll("[data-go-step]").forEach(b=>b.onclick=()=>{if(b.dataset.goP)v6Profile=b.dataset.goP;setStage(b.dataset.goStep);refreshPracticeTabs()});
@@ -529,7 +609,7 @@ function normalizedPractice(p,raw){const base=emptyGrid(p),t=PRACTICE[p];if(!raw
  const str=v=>typeof v==="string"?v:"";
  base.situations=raw.situations.map(s=>{if(!s||!Array.isArray(s.criteria)||s.criteria.length!==t.criteria.length||s.criteria.some((c,i)=>c.text!==t.criteria[i]))throw Error("Indicateurs de brouillon incompatibles");return {title:str(s.title),observations:str(s.observations),criteria:t.criteria.map((text,i)=>({text,mark:Object.prototype.hasOwnProperty.call(marks,s.criteria[i].mark)?s.criteria[i].mark:"",note:str(s.criteria[i].note)}))}});
  for(const k of ["observations","reserve","avisTension","avisOuvrages","avisIndications"])base[k]=str(raw[k]);
- base.adjustConfirmed=raw.adjustConfirmed===true;base.adjustReason=str(raw.adjustReason).slice(0,500);base.adjustAuthorized=base.adjustConfirmed&&!!base.adjustReason.trim()&&raw.adjustAuthorized===true;
+ 
  base.opinion=Object.prototype.hasOwnProperty.call(ops,raw.opinion)?raw.opinion:"incomplet";return base;
 }
 async function restoreDraft(){
