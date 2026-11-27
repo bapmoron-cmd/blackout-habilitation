@@ -6,6 +6,8 @@ const PRACTICE=window.HAB_PRACTICE||{};
 if(document.body.dataset.mode==="formateur"&&!D.profiles.some(p=>p.id==="B2V_Essai"))D.profiles.push({id:"B2V_Essai",name:"B2V Essai",domain:"BT",role:"chargé de travaux avec essais",scope:"B2V Essai — périmètre selon la formation et les prescriptions applicables",criteria:[],legacy:false});
 const P=Object.fromEntries(D.profiles.map(p=>[p.id,p])), Q=Object.fromEntries(D.bank.map(q=>[q.id,q])), A=document.getElementById("app"), $=id=>document.getElementById(id);
 const MODE=document.body.dataset.mode, VERSION=D.version, PREFIX="BLACKOUT-HAB-V5:", KEY="blackout-hab-v6-theory-"+VERSION;
+const DEMO=MODE==="formateur"&&document.body.dataset.demo==="true";
+const minimum=p=>PRACTICE[p]?(DEMO?1:PRACTICE[p].min):0;
 const themes={risk:"Dangers et protections",zone:"Zones et distances",limit:"Limites du symbole"};
 const marks={A:"Sans erreur",B:"Erreur acceptable",C:"Erreur majeure",D:"Erreur grave"};
 const PRACTICE_RULE="Aucun D et au plus un C pour chaque mise en situation.";
@@ -163,7 +165,7 @@ function initSignaturePad(role){
 
 
 function newSituation(p){const template=PRACTICE[p];return {title:"",criteria:(template?.criteria||[]).map(text=>({text,mark:"",note:""})),observations:""}}
-function emptyGrid(p){const template=PRACTICE[p];return {situations:template?Array.from({length:template.min},()=>newSituation(p)):[],observations:"",opinion:"incomplet",reserve:"",avisTension:"",avisOuvrages:"",avisIndications:""}}
+function emptyGrid(p){const template=PRACTICE[p];return {situations:template?Array.from({length:minimum(p)},()=>newSituation(p)):[],observations:"",opinion:"incomplet",reserve:"",avisTension:"",avisOuvrages:"",avisIndications:""}}
 function gridFor(p){return T.practice[p]||(T.practice[p]=emptyGrid(p))}
 function removeSituation(p,index){const g=gridFor(p);if(!PRACTICE[p]||!Number.isInteger(index)||index<0||index>=g.situations.length)return false;g.situations.splice(index,1);g.opinion="incomplet";invalidateSignatureReview();return true}
 
@@ -184,7 +186,7 @@ function situationStatus(s){
 function gridStatus(p){
  const g=gridFor(p),r=readTheory(p),template=PRACTICE[p],situations=g.situations.map(situationStatus);
  const counts=situations.reduce((a,s)=>{for(const k of Object.keys(a))a[k]+=s.counts[k];return a},{A:0,B:0,C:0,D:0,unseen:0});
- const positive=!!r?.passed&&T.verified&&identityMatch(),complete=!!template&&situations.length>=template.min&&situations.every(s=>s.complete),failed=situations.some(s=>s.failed),practicePassed=complete&&!failed,possible=positive&&practicePassed;
+ const positive=!!r?.passed&&T.verified&&identityMatch(),complete=!!template&&situations.length>=minimum(p)&&situations.every(s=>s.complete),failed=situations.some(s=>s.failed),practicePassed=complete&&!failed,possible=positive&&practicePassed;
  return {r,counts,situations,positive,complete,failed,practicePassed,possible,template};
 }
 
@@ -204,7 +206,7 @@ function decisionReview(p){
  if(!t)blockers.push("grille pratique non disponible");
  else{
   if(!s.r||s.r.critical===null)blockers.push("résultat théorique manquant / non renseigné");
-  if(!s.complete&&!stopped)blockers.push(g.situations.length<t.min?"minimum de "+t.min+" situations non atteint":"compléter les intitulés et indicateurs");
+  if(!s.complete&&!stopped)blockers.push(g.situations.length<minimum(p)?"minimum de "+minimum(p)+" situation(s) non atteint":"compléter les intitulés et indicateurs");
   if(g.opinion==="incomplet")blockers.push("sélectionner l’avis du formateur");
   if(negative&&!reasoned)blockers.push("justifier l’avis défavorable (aucun échec objectif relevé)");
   if(g.opinion==="favorable"&&!s.possible)blockers.push("critères incompatibles avec l’avis favorable");
@@ -215,12 +217,12 @@ function reviewBadge(p){const d=decisionReview(p);return d.closed?status(d.negat
 
 function trainerFields(){const i=T.identity;return '<div class="grid fields">'+field("nom","Nom",i.nom,"text",true)+field("prenom","Prénom",i.prenom,"text",true)+field("groupe","Classe / groupe",i.groupe,"text",true)+field("entreprise","Entreprise",i.entreprise,"text",true)+field("organisme","Organisme de formation",i.organisme,"text",true)+field("lieu","Lieu",i.lieu,"text",true)+field("formateur","Formateur / signataire",i.formateur,"text",true)+field("fonction","Fonction du signataire",i.fonction,"text",true)+field("dateTheorie","Date théorie",i.dateTheorie,"date",true)+field("datePratique","Date pratique",i.datePratique,"date",true)+field("dureeTheorie","Durée théorie (ex. 7 h)",i.dureeTheorie,"text",true)+field("dureePratique","Durée pratique (ex. 3 h)",i.dureePratique,"text",true)+field("stage","Intitulé de la formation",i.stage,"text",true)+field("datesFormation","Dates de la formation (facultatif : dates des évaluations par défaut)",i.datesFormation)+field("dureeFormation","Durée totale (facultatif : théorie + pratique par défaut)",i.dureeFormation)+'<label>Type de formation<select id="type"><option '+(i.type==="Initiale"?"selected":"")+'>Initiale</option><option '+(i.type==="Recyclage"?"selected":"")+'>Recyclage</option></select></label></div><label class="fields" style="display:block;margin-top:12px;font-size:14px;font-weight:700;color:var(--muted)">Attributions, environnement et restrictions envisagés par l’employeur<textarea id="perimetre" placeholder="Installations, domaine de tension, opérations, limites…">'+E(i.perimetre)+'</textarea></label>'}
 function renderTrainer(){
- A.innerHTML=hero("Espace formateur / V6","Poste de travail du formateur","Identifiez le stagiaire, importez la théorie, évaluez les situations et signez l’avis PROMEO.")+
+ A.innerHTML=hero("Espace formateur / V6",DEMO?"Test technique — dossier fictif":"Poste de travail du formateur",DEMO?"Une seule situation suffit pour tester la chaîne PDF. Aucun document ne constitue une attestation valable.":"Identifiez le stagiaire, importez la théorie, évaluez les situations et signez l’avis PROMEO.")+
  '<section class="panel"><div class="eyebrow">01 / Théorie</div><h2>Importer le PDF de l’apprenti</h2><div class="filebox"><label for="theoryFile"><b>Fichier PDF de théorie</b></label><input id="theoryFile" type="file" accept="application/pdf,.pdf"><p id="importMessage" role="status" class="'+(T.source?"success":"muted")+'" style="margin:9px 0 0">'+E(T.importMessage||"Aucun fichier importé.")+'</p></div>'+(T.file?'<div class="toolbar" style="margin-top:10px"><button id="openTheory" type="button">Ouvrir le PDF importé</button><button id="removeTheory" type="button" class="secondary">Retirer le PDF</button></div>':'')+
  '<p class="fine">Pour un PDF issu de la V5, les réponses intégrées sont recalculées. Le document d’origine reste annexé. Le fichier n’est ni authentifié ni envoyé vers un serveur.</p>'+(T.file?'<label class="checkline"><input id="verified" type="checkbox" '+(T.verified?"checked":"")+'>J’ai contrôlé le PDF original, l’identité, les résultats et les conditions de réalisation du test. Pour un PDF externe, j’ai vérifié les résultats reportés et les critères de réussite applicables.</label>':'')+'</section>'+
- '<section class="panel"><div class="eyebrow">02 / Identification</div><h2>Informations du dossier</h2>'+trainerFields()+'</section><section class="panel"><div class="eyebrow">03 / Périmètre</div><h2>Symboles faisant l’objet de l’évaluation</h2><p class="muted">Cochez les symboles à évaluer. Les grilles Word fournies sont utilisées pour les symboles couverts. Les autres restent à compléter (aucun avis favorable possible). Chaque indice BE Essai ou BE Mesurage exige deux situations propres.</p>'+profilePicker(T.profiles)+'<label class="fields" style="display:block;font-size:14px;font-weight:700;margin-top:14px">Titre(s) demandé(s) par l’entreprise<input id="titresDemandes" maxlength="400" value="'+E(T.identity.titresDemandes)+'" placeholder="'+E(T.profiles.map(get).join(", "))+'"></label><p class="fine">Si ce champ reste vide, les symboles cochés sont repris comme demande de l’entreprise. Si la demande est différente, précisez-la ici : aucun avis favorable global ne sera déduit à tort.</p></section><div id="practiceArea"></div>'+
+ '<section class="panel"><div class="eyebrow">02 / Identification</div><h2>Informations du dossier</h2>'+trainerFields()+'</section><section class="panel"><div class="eyebrow">03 / Périmètre</div><h2>Symboles faisant l’objet de l’évaluation</h2><p class="muted">Cochez les symboles à évaluer. Les grilles Word fournies sont utilisées pour les symboles couverts. Les autres restent à compléter (aucun avis favorable possible). Chaque indice BE Essai ou BE Mesurage exige deux situations propres en mode réel.</p>'+profilePicker(T.profiles,DEMO?Object.keys(PRACTICE):null)+'<label class="fields" style="display:block;font-size:14px;font-weight:700;margin-top:14px">Titre(s) demandé(s) par l’entreprise<input id="titresDemandes" maxlength="400" value="'+E(T.identity.titresDemandes)+'" placeholder="'+E(T.profiles.map(get).join(", "))+'"></label><p class="fine">Si ce champ reste vide, les symboles cochés sont repris comme demande de l’entreprise. Si la demande est différente, précisez-la ici : aucun avis favorable global ne sera déduit à tort.</p></section><div id="practiceArea"></div>'+
  '<section class="panel"><div class="eyebrow">05 / Dossier final</div><h2>Générer l’avis après formation</h2><div class="info">Modèle PROMEO « Avis après formation » fourni : titre(s) demandé(s), avis favorable / défavorable, autre proposition, champ d’application et signature. Les évaluations restent annexées au dossier complet.</div><div id="avisPreview" class="notice" role="status"></div><label class="fields" style="font-size:14px;font-weight:700;color:var(--muted)">Observations globales / restrictions<textarea id="scopeNotes" placeholder="Précisions, limites d’activité, compléments de formation, contexte…">'+E(T.scopeNotes)+'</textarea></label><div class="notice">'+E(pilot)+'</div><label class="checkline"><input id="reviewed" type="checkbox" '+(T.reviewed?"checked":"")+'>Je confirme avoir relu le dossier, les titres demandés par l’entreprise, les dates, le champ d’application proposé et les avis. Les informations correspondent à mes observations. Je signe ensuite l’avis en connaissance de cause.</label>'+signatureMarkup()+'<p id="error" role="alert" class="error"></p><div class="sticky-summary row"><span id="overallStatus" class="muted"></span><div class="toolbar"><button id="resetTrainer" class="secondary">Nouveau dossier</button><button id="generateAvis" class="secondary">Télécharger l’avis PROMEO seul</button><button id="generate" class="primary">Générer le dossier PDF complet</button></div></div></section>'+footer();
- $("theoryFile").onchange=async e=>{const file=e.target.files?.[0];if(file)await importPDF(file)};
+ $("theoryFile").onchange=async e=>{const file=e.target.files?.[0];if(file&&!DEMO)await importPDF(file)};
  if($("openTheory"))$("openTheory").onclick=()=>{const u=URL.createObjectURL(new Blob([T.file.bytes],{type:"application/pdf"}));window.open(u,"_blank","noopener,noreferrer");setTimeout(()=>URL.revokeObjectURL(u),120000)};
  if($("removeTheory"))$("removeTheory").onclick=()=>{if(confirm("Retirer le PDF et les résultats théoriques associés ? Les observations pratiques restent en mémoire.")){T.file=null;T.source=null;T.external={};T.verified=false;invalidateSignatureReview();T.importMessage="PDF retiré.";for(const g of Object.values(T.practice))if(g.opinion==="favorable")g.opinion="incomplet";renderTrainer()}};
  if($("verified"))$("verified").onchange=e=>{T.verified=e.target.checked;invalidateSignatureReview();$("reviewed").checked=false;renderPractices()};
@@ -235,6 +237,7 @@ function renderTrainer(){
  renderPractices();mountWorkspace();updateOverall();
 }
 async function importPDF(file){
+ if(DEMO)return;
  try{
   if(file.size>30*1024*1024)throw Error("PDF trop volumineux : limite 30 Mo.");const {PDFDocument}=requirePdf(),bytes=new Uint8Array(await file.arrayBuffer()),pdf=await PDFDocument.load(bytes);
   if(!pdf.getPageCount())throw Error("PDF vide.");let source=null,message;
@@ -261,7 +264,7 @@ function renderPractices(){
  const desc=!r?"Résultat théorique absent":theoryLabel(r)+" · "+r.good+"/"+r.total+" ("+r.pct+" %)"+(r.critical===null?" · critiques à vérifier":" · critiques : "+r.critical);
  let body="";
  if(t){
- body='<details class="source-objectives"><summary>Objectifs de la grille '+E(t.source)+' ('+t.objectives.length+')</summary><ul>'+t.objectives.map(o=>'<li>'+E(o)+'</li>').join("")+'</ul></details><div class="info"><b>'+t.min+' mise(s) en situation minimum</b> · '+E(PRACTICE_RULE)+'</div><div class="mark-legend">'+Object.entries(marks).map(([k,v])=>'<span><b class="legend-'+k+'">'+k+'</b> '+E(v)+'</span>').join("")+'</div>'+
+ body='<details class="source-objectives"><summary>Objectifs de la grille '+E(t.source)+' ('+t.objectives.length+')</summary><ul>'+t.objectives.map(o=>'<li>'+E(o)+'</li>').join("")+'</ul></details><div class="info"><b>'+minimum(p)+' mise(s) en situation minimum</b> · '+E(PRACTICE_RULE)+(DEMO?" · Test uniquement : minimum réel "+t.min:"")+'</div><div class="mark-legend">'+Object.entries(marks).map(([k,v])=>'<span><b class="legend-'+k+'">'+k+'</b> '+E(v)+'</span>').join("")+'</div>'+
  g.situations.map((sit,si)=>'<article class="situation" data-situation="'+si+'"><div class="row"><h3>Mise en situation n°'+(si+1)+'</h3><div data-sit-badge>'+situationBadge(situationStatus(sit))+'</div></div><label class="fields" style="display:block;font-size:14px;font-weight:700">Intitulé de la mise en situation *<input data-title maxlength="240" placeholder="Intitulé de la situation réalisée" value="'+E(sit.title)+'"></label><div class="practice-indicators"><div class="practice-table-head"><span>Indicateurs</span><span>Notation A / B / C / D</span></div>'+sit.criteria.map((c,i)=>'<div class="criterion"><div><strong>'+E(String(i+1)+". "+c.text)+'</strong><details class="criterion-note" '+(c.note?"open":"")+'><summary>'+(c.note?"Observation saisie":"Ajouter une observation")+'</summary><input data-note="'+i+'" placeholder="Observation facultative" maxlength="300" value="'+E(c.note)+'" aria-label="Observation du critère '+(i+1)+'"></details></div>'+markButtons(p,si,c,i)+'</div>').join("")+'</div><div class="grade-summary" data-sit-summary>'+E(countText(situationStatus(sit).counts))+'</div><label class="fields" style="display:block;font-size:14px;font-weight:700">Observations de la situation<textarea data-sit-observations placeholder="Observations facultatives">'+E(sit.observations)+'</textarea></label>'+'<button type="button" class="secondary remove-situation" data-remove-situation="'+si+'">Supprimer cette mise en situation</button>'+'</article>').join("")+
  (g.situations.length===0?'<div class="notice">Aucune situation renseignée. Ajoutez une mise en situation pour poursuivre.</div>':'')+'<button type="button" data-add-situation class="secondary">+ Ajouter une mise en situation</button>';
  if(p==="B2V_Essai")body='<div class="notice">Grille pratique B2V Essai distincte de B2V et BE Essai. Aucun QCM V5 spécifique disponible ; utilisez un PDF théorique externe couvrant explicitement B2V Essai et renseignez ses résultats.</div>'+body;
@@ -282,7 +285,7 @@ function renderPractices(){
     box.querySelectorAll("[data-mark]").forEach(x=>x.onchange=()=>{if(x.checked){sit.criteria[Number(x.dataset.mark)].mark=x.value;change()}});
     box.querySelectorAll("[data-clear-mark]").forEach(x=>x.onclick=()=>{const j=Number(x.dataset.clearMark);sit.criteria[j].mark="";box.querySelectorAll('[data-mark="'+j+'"]').forEach(r=>r.checked=false);change()});
     box.querySelectorAll("[data-note]").forEach(x=>x.oninput=()=>{sit.criteria[Number(x.dataset.note)].note=x.value;commentChange()});
-    const remove=box.querySelector("[data-remove-situation]");if(remove)remove.onclick=()=>{const remaining=g.situations.length-1,missing=Math.max(0,t.min-remaining),hasData=!!(sit.title.trim()||sit.observations.trim()||sit.criteria.some(c=>c.mark||c.note.trim()));const message="Supprimer la mise en situation n°"+(si+1)+" de "+get(p)+" ?"+(hasData?"\nLes notes et observations seront retirées. Vous pourrez annuler la dernière suppression tant que le dossier reste ouvert.":"")+(missing?"\nIl manquera "+missing+" situation(s) pour atteindre le minimum de la grille. L’avis favorable restera bloqué.":"");if(confirm(message)){const removed={p,index:si,situation:sit,grid:g};if(removeSituation(p,si)){v6Undo=removed;v6Situation[p]=Math.max(0,Math.min(si,g.situations.length-1));renderPractices()}}};
+    const remove=box.querySelector("[data-remove-situation]");if(remove)remove.onclick=()=>{const remaining=g.situations.length-1,missing=Math.max(0,minimum(p)-remaining),hasData=!!(sit.title.trim()||sit.observations.trim()||sit.criteria.some(c=>c.mark||c.note.trim()));const message="Supprimer la mise en situation n°"+(si+1)+" de "+get(p)+" ?"+(hasData?"\nLes notes et observations seront retirées. Vous pourrez annuler la dernière suppression tant que le dossier reste ouvert.":"")+(missing?"\nIl manquera "+missing+" situation(s) pour atteindre le minimum de la grille. L’avis favorable restera bloqué.":"");if(confirm(message)){const removed={p,index:si,situation:sit,grid:g};if(removeSituation(p,si)){v6Undo=removed;v6Situation[p]=Math.max(0,Math.min(si,g.situations.length-1));renderPractices()}}};
   });
   const add=el.querySelector("[data-add-situation]");if(add)add.onclick=()=>{if(g.situations.length>=12)return alert("12 situations maximum.");g.situations.push(newSituation(p));v6Situation[p]=g.situations.length-1;g.opinion="incomplet";invalidate();renderPractices()};
   el.querySelectorAll("[data-field]").forEach(x=>x.oninput=()=>{g[x.dataset.field]=x.value;commentChange()});
@@ -295,7 +298,7 @@ function renderPractices(){
 function refreshPractice(p,el){const g=gridFor(p),s=gridStatus(p),op=el.querySelector("[data-opinion]");if(!s.possible&&g.opinion==="favorable")g.opinion="incomplet";op.querySelector('option[value="favorable"]').disabled=!s.possible;op.value=g.opinion;
  const review=el.querySelector("[data-review-status]"),d=decisionReview(p);if(review){review.innerHTML=reviewBadge(p)+(d.closed&&d.negative?(d.stopped?'<p class="fine">Échec constaté : la clôture est défavorable, les autres éléments restent non évalués.</p>':'<p class="fine">L’évaluation est clôturée avec un avis défavorable, sans validation du symbole.</p>'):(d.blockers.length?'<p class="fine">'+E(d.blockers.join(" · "))+'</p>':""))}
  el.querySelectorAll("[data-situation]").forEach(box=>{const z=s.situations[Number(box.dataset.situation)];box.querySelector("[data-sit-badge]").innerHTML=situationBadge(z);box.querySelector("[data-sit-summary]").textContent=countText(z.counts)});
- el.querySelector("[data-summary]").innerHTML='<span>Situations satisfaites : <b>'+s.situations.filter(z=>z.pass).length+'/'+g.situations.length+'</b></span>'+practiceBadge(s)+(s.template&&g.situations.length<s.template.min?status("Minimum non atteint : "+(s.template.min-g.situations.length)+" situation(s) manquante(s)","bad"):"")+(s.practicePassed&&!s.positive?status("Théorie à contrôler","wait"):"");updateOverall()}
+ el.querySelector("[data-summary]").innerHTML='<span>Situations satisfaites : <b>'+s.situations.filter(z=>z.pass).length+'/'+g.situations.length+'</b></span>'+practiceBadge(s)+(s.template&&g.situations.length<minimum(p)?status("Minimum non atteint : "+(minimum(p)-g.situations.length)+" situation(s) manquante(s)","bad"):"")+(s.practicePassed&&!s.positive?status("Théorie à contrôler","wait"):"");updateOverall()}
 
 
 function avisProfiles(){
@@ -341,7 +344,7 @@ async function trainerPDF(onlyAvis=false){
  validateAvis();
  const i=T.identity,ref=T.source?.packet.id||("EXT-"+Date.now().toString(36).toUpperCase());
  const avisDoc=await window.HAB_AVIS.create(avisPayload(trainerSigned),requirePdf());
- if(onlyAvis){download(await avisDoc.save(),"AVIS_PROMEO_"+safeName(i.nom)+"_"+safeName(i.prenom)+".pdf");return}
+ if(onlyAvis){if(DEMO)await watermarkDemo(avisDoc);download(await avisDoc.save(),(DEMO?"DEMONSTRATION_":"")+"AVIS_PROMEO_"+safeName(i.nom)+"_"+safeName(i.prenom)+".pdf");return}
  const b=await pdfBuilder("Dossier des évaluations","Annexes théorie et pratique / avis signé",ref);
  b.doc.setTitle("Avis après formation - "+i.nom+" "+i.prenom);b.doc.setAuthor(i.organisme);b.doc.setSubject("Avis après formation préalable à l'habilitation électrique - V5 pilote");
  b.heading("01 / Identification de l'apprenti et de la formation");
@@ -352,18 +355,19 @@ async function trainerPDF(onlyAvis=false){
 
  for(const p of T.profiles){
  const g=gridFor(p),s=gridStatus(p),r=s.r,t=s.template;b.newPage();b.heading("04 / Grille pratique - "+get(p));b.text("Source : "+(t?t.source+" - grille Word fournie":"Grille non fournie"),{weight:true});b.text("Théorie : "+(r?r.good+"/"+r.total+" ("+r.pct+" %) / "+theoryLabel(r):"Non renseignée")+" ; contrôle formateur : "+(T.verified?"déclaré effectué":"non confirmé"),{size:9});
- if(t){b.text("Nombre minimal de situations : "+t.min+" | "+PRACTICE_RULE,{weight:true});b.text("A : sans erreur ; B : erreur acceptable ; C : erreur majeure ; D : erreur grave.",{size:9});b.section("Objectifs des mises en situations pratiques");for(const objective of t.objectives)b.text("- "+objective,{size:9,gap:3});
+ if(t){b.text("Minimum de la grille réelle : "+t.min+(DEMO?" | TEST TECHNIQUE : minimum simulé 1":"")+" | "+PRACTICE_RULE,{weight:true});b.text("A : sans erreur ; B : erreur acceptable ; C : erreur majeure ; D : erreur grave.",{size:9});b.section("Objectifs des mises en situations pratiques");for(const objective of t.objectives)b.text("- "+objective,{size:9,gap:3});
  if(p==="BC")b.text("Note : l'objectif et l'indicateur relatifs à la consignation diffèrent dans le document source. Formulations conservées ; à vérifier avec le référent.",{size:9});
  for(let j=0;j<g.situations.length;j++){const sit=g.situations[j],z=s.situations[j];b.newPage();b.heading(get(p)+" - Mise en situation n°"+(j+1));b.text("Intitulé : "+(sit.title||"Non renseigné"),{weight:true});b.text(PRACTICE_RULE,{size:9});for(let k=0;k<sit.criteria.length;k++){const c=sit.criteria[k];b.text((k+1)+". "+c.text,{weight:true,size:10,gap:2});b.text("Notation : "+(marks[c.mark]?c.mark+" - "+marks[c.mark]:"Non renseignée")+(c.note?"  |  "+c.note:""),{size:9,gap:6})}b.text(countText(z.counts),{weight:true});b.text("Bilan de la situation : "+(z.failed?"Critères non satisfaits":z.pass?"Critères satisfaits":"À compléter"),{weight:true});b.text("Observations : "+(sit.observations||"Non renseignées"),{size:9});}
  }else b.text("Aucun avis favorable autorisé tant que la grille correspondant au symbole n'est pas fournie.",{weight:true});
- b.heading("Bilan pratique et avis");b.text(t?"Situations satisfaites : "+s.situations.filter(z=>z.pass).length+"/"+g.situations.length+" ; minimum "+t.min+" ; bilan : "+(s.failed?"Non réussie":s.practicePassed?"Réussie":"À compléter"):"Grille non fournie",{weight:true});if(t)b.text("Critères d'acceptation : "+PRACTICE_RULE+" Toutes les situations doivent être renseignées et satisfaisantes. L'avis favorable requiert aussi une théorie positive et contrôlée.",{size:9});b.text("Observations globales : "+(g.observations||"Non renseignées"));b.text("Avis du formateur : "+ops[g.opinion],{weight:true});b.text("Restrictions / suites : "+(g.reserve||"Non renseignées"));
+ b.heading("Bilan pratique et avis");b.text(t?"Situations satisfaites : "+s.situations.filter(z=>z.pass).length+"/"+g.situations.length+" ; minimum réel "+t.min+(DEMO?" ; minimum de test 1":"")+" ; bilan : "+(s.failed?"Non réussie":s.practicePassed?"Réussie":"À compléter"):"Grille non fournie",{weight:true});if(t)b.text("Critères d'acceptation : "+PRACTICE_RULE+" Toutes les situations doivent être renseignées et satisfaisantes. L'avis favorable requiert aussi une théorie positive et contrôlée.",{size:9});b.text("Observations globales : "+(g.observations||"Non renseignées"));b.text("Avis du formateur : "+ops[g.opinion],{weight:true});b.text("Restrictions / suites : "+(g.reserve||"Non renseignées"));
  }
 
  b.newPage();b.heading("05 / Signatures et validation de l'avis");b.text(identityLine(i),{weight:true,size:12});b.text("Référence du dossier : "+ref);b.text("Avis favorables : "+(fav.map(get).join(" ; ")||"Aucun"));b.text("Le formateur confirme avoir relu le dossier et ses observations. La signature de l'apprenti, si présente, atteste uniquement sa prise de connaissance.",{size:10});await b.signature("Formateur / signataire de l'avis",i.formateur+" - "+i.fonction,trainerSigned);await b.signature("Apprenti / prise de connaissance (facultatif)",i.nom+" "+i.prenom,learnerSigned);b.text("Signatures manuscrites numérisées, sans certificat électronique ni horodatage de confiance. Le titre d'habilitation relève de l'employeur.",{size:9});
  b.newPage();b.heading("06 / Annexe - évaluation théorique originale");b.text("Fichier joint : "+T.file.name,{weight:true});b.text("Nombre de pages annexées : "+T.file.pages);b.text("Source : "+(T.source?"PDF V5 reconnu, réponses recalculées localement":"PDF externe, résultats reportés manuellement"));b.text("Contrôle des conditions de réalisation par le formateur : "+(T.verified?"confirmé":"non confirmé"));b.text("Le PDF original est reproduit à la suite de cette page. Les métadonnées d'un fichier local ne constituent pas une preuve d'authenticité.",{size:9});b.text("Références de cadrage : INRS ED 6127, sections 5.4 et 7.2 ; Code du travail, article R. 4544-10. Vérifier les référentiels et prescriptions applicables au contexte de formation.",{size:9});
  const {PDFDocument}=requirePdf(),original=await PDFDocument.load(T.file.bytes),pages=await b.doc.copyPages(original,original.getPageIndices());pages.forEach(p=>b.doc.addPage(p));
  const avisPages=await b.doc.copyPages(avisDoc,avisDoc.getPageIndices());avisPages.forEach((p,i)=>b.doc.insertPage(i,p));
- download(await b.doc.save(),"AVIS_HABILITATION_"+safeName(i.nom)+"_"+safeName(i.prenom)+"_"+ref+".pdf");
+ if(DEMO)await watermarkDemo(b.doc);
+ download(await b.doc.save(),(DEMO?"DEMONSTRATION_":"")+"AVIS_HABILITATION_"+safeName(i.nom)+"_"+safeName(i.prenom)+"_"+ref+".pdf");
 }
 
 /* V6 : navigation et ergonomie, sans changement des grilles ni des barèmes. */
@@ -413,7 +417,7 @@ function mountWorkspace(){
  $("v6RestoreDraft").onclick=()=>restoreDraft();
  $("v6EraseDraft").onclick=()=>eraseDraft();
  $("v6NewDraft").onclick=()=>newTrainerDraft();
- setStage(v6Stage,false);draftLabel();
+ installDemoControls(aside);setStage(v6Stage,false);draftLabel();
 }
 function refreshWorkspace(){
  if(!$("v6Name"))return;
@@ -422,7 +426,7 @@ function refreshWorkspace(){
  const missing=missingItems(),completed={identity:!missing.some(x=>x[0]==="identity"),theory:!missing.some(x=>x[0]==="theory"),practice:T.profiles.length>0&&!missing.some(x=>x[0]==="practice"),final:!missing.length&&!!validSignature("trainer")};
  const count=Object.values(completed).filter(Boolean).length;$("v6Percent").textContent=count+"/4";$("v6Progress").style.width=count*25+"%";
  A.querySelectorAll("[data-step-state]").forEach(el=>{const id=el.dataset.stepState;const negative=id==="practice"&&completed[id]&&T.profiles.some(p=>decisionReview(p).negative);el.textContent=completed[id]?(negative?"Terminé · défavorable(s)":"Terminé"):id===v6Stage?"En cours":"À compléter";el.parentElement.parentElement.classList.toggle("step-done",completed[id]&&!negative);el.parentElement.parentElement.classList.toggle("step-negative",negative)});
- $("v6SymbolSummary").innerHTML=T.profiles.length?T.profiles.map(p=>{const g=gridFor(p),s=gridStatus(p),d=decisionReview(p),done=s.situations.filter(z=>z.complete).length,total=Math.max(g.situations.length,s.template?.min||0,1);return '<button type="button" class="symbol-summary" data-go-symbol="'+E(p)+'"><span><b>'+E(get(p))+'</b><small>'+done+'/'+total+' situations renseignées</small></span><span class="status '+(d.closed?(d.negative?"bad":"good"):"wait")+'">'+(d.closed?(d.negative?"Défavorable":"Terminé"):"À faire")+'</span></button><div class="progress mini"><i style="width:'+Math.min(100,done/total*100)+'%"></i></div>'}).join(""):'<p class="fine">Les symboles apparaîtront ici après sélection.</p>';
+ $("v6SymbolSummary").innerHTML=T.profiles.length?T.profiles.map(p=>{const g=gridFor(p),s=gridStatus(p),d=decisionReview(p),done=s.situations.filter(z=>z.complete).length,total=Math.max(g.situations.length,minimum(p),1);return '<button type="button" class="symbol-summary" data-go-symbol="'+E(p)+'"><span><b>'+E(get(p))+'</b><small>'+done+'/'+total+' situations renseignées</small></span><span class="status '+(d.closed?(d.negative?"bad":"good"):"wait")+'">'+(d.closed?(d.negative?"Défavorable":"Terminé"):"À faire")+'</span></button><div class="progress mini"><i style="width:'+Math.min(100,done/total*100)+'%"></i></div>'}).join(""):'<p class="fine">Les symboles apparaîtront ici après sélection.</p>';
  $("v6SymbolSummary").querySelectorAll("[data-go-symbol]").forEach(b=>b.onclick=()=>{v6Profile=b.dataset.goSymbol;setStage("practice");refreshPracticeTabs()});
  $("v6Checklist").innerHTML='<h4>À compléter</h4>'+(missing.length?missing.map(([id,msg,p])=>'<button type="button" class="check-task" data-go-step="'+id+'" data-go-p="'+E(p||"")+'"><span aria-hidden="true">○</span> '+E(msg)+'</button>').join(""):validSignature("trainer")?'<p class="success">Dossier prêt à exporter.</p>':'<button type="button" class="check-task" data-go-step="final">○ Relire et signer l’avis</button>');
  $("v6Checklist").querySelectorAll("[data-go-step]").forEach(b=>b.onclick=()=>{if(b.dataset.goP)v6Profile=b.dataset.goP;setStage(b.dataset.goStep);refreshPracticeTabs()});
@@ -462,12 +466,12 @@ async function previewAvis(){
  if(requiredIdentity.some(k=>!T.identity[k]?.trim()))throw Error("Complétez les champs obligatoires de l’identification et de la formation.");
  if(!identityMatch())throw Error("L’identité diffère du PDF importé.");
  validateAvis();
- const pdf=await window.HAB_AVIS.create(avisPayload(null),requirePdf(),{preview:true});const bytes=await pdf.save(),url=URL.createObjectURL(new Blob([bytes],{type:"application/pdf"}));
+ const pdf=await window.HAB_AVIS.create(avisPayload(null),requirePdf(),{preview:true});if(DEMO)await watermarkDemo(pdf);const bytes=await pdf.save(),url=URL.createObjectURL(new Blob([bytes],{type:"application/pdf"}));
  const dialog=element("dialog","v6-pdf-dialog",'<div class="row"><div><h2>Aperçu de l’avis PROMEO</h2><p class="fine">BROUILLON NON SIGNÉ — ne pas transmettre</p></div><button type="button" class="secondary" id="v6ClosePreview">Fermer</button></div><iframe title="Brouillon PDF de l’avis PROMEO"></iframe><p class="fine">Si le lecteur intégré est indisponible, <a target="_blank" rel="noopener" id="v6OpenPreview">ouvrir le brouillon dans un nouvel onglet</a>.</p>');document.body.append(dialog);dialog.querySelector("iframe").src=url;dialog.querySelector("#v6OpenPreview").href=url;dialog.querySelector("#v6ClosePreview").onclick=()=>dialog.close();dialog.addEventListener("close",()=>{dialog.remove();URL.revokeObjectURL(url)},{once:true});dialog.showModal();
 }
 /* Opt-in local draft: one record, no signatures, no network. */
 let draftEnabled=false,draftTimer=null,draftSerial=Promise.resolve(),draftMessage="Brouillon en mémoire de l’onglet",draftDirty=false,draftRevision=0,leavingDraft=false;
-function draftLabel(){const e=$("v6DraftState");if(e)e.textContent=draftMessage;const b=$("v6SaveDraft");if(b)b.textContent=draftEnabled?"Sauvegarder maintenant":"Activer la sauvegarde locale"}
+function draftLabel(){const e=$("v6DraftState");if(e)e.textContent=DEMO?"Simulation locale · aucun enregistrement permanent":draftMessage;const b=$("v6SaveDraft");if(b)b.textContent=draftEnabled?"Sauvegarder maintenant":"Activer la sauvegarde locale"}
 function dbAction(mode,fn){return new Promise((resolve,reject)=>{if(!window.indexedDB){reject(Error("Stockage local indisponible"));return}const req=indexedDB.open("blackout-hab-v6-local",1);req.onupgradeneeded=()=>req.result.createObjectStore("drafts");req.onerror=()=>reject(req.error||Error("Ouverture impossible"));req.onsuccess=()=>{const db=req.result;try{const tx=db.transaction("drafts",mode);const r=fn(tx.objectStore("drafts"));tx.oncomplete=()=>{db.close();resolve(r?.result)};tx.onabort=tx.onerror=()=>{db.close();reject(tx.error||Error("Écriture impossible"))}}catch(e){db.close();reject(e)}}})}
 function draftSnapshot(){return {schema:1,savedAt:new Date().toISOString(),identity:{...T.identity},file:T.file?{name:T.file.name,bytes:T.file.bytes.slice(),pages:T.file.pages}:null,profiles:[...T.profiles],practice:JSON.parse(JSON.stringify(T.practice)),external:JSON.parse(JSON.stringify(T.external)),verified:T.verified,scopeNotes:T.scopeNotes}}
 function writeDraft(){
@@ -477,6 +481,7 @@ function writeDraft(){
 }
 function scheduleDraft(){if(MODE!=="formateur"||!draftEnabled)return;draftDirty=true;draftRevision++;clearTimeout(draftTimer);draftMessage="Modifications à sauvegarder…";draftLabel();draftTimer=setTimeout(writeDraft,650)}
 async function activateDraft(){
+ if(DEMO)return;
  try{if(!draftEnabled){await draftSerial.catch(()=>{});const old=await dbAction("readonly",s=>s.get("current"));if(!confirm("Sauvegarder ce dossier et son PDF sur ce navigateur ? Les données ne sont pas chiffrées. N’utilisez cette option que sur un poste autorisé."+ (old?"\nLe brouillon précédent sera remplacé.":"")))return;draftEnabled=true}
  await writeDraft();
  }catch(e){draftMessage="Sauvegarde indisponible : "+e.message;draftLabel();showError(draftMessage)}
@@ -488,6 +493,7 @@ function normalizedPractice(p,raw){const base=emptyGrid(p),t=PRACTICE[p];if(!raw
  base.opinion=Object.prototype.hasOwnProperty.call(ops,raw.opinion)?raw.opinion:"incomplet";return base;
 }
 async function restoreDraft(){
+ if(DEMO)return;
  try{clearTimeout(draftTimer);draftTimer=null;await draftSerial.catch(()=>{});const d=await dbAction("readonly",s=>s.get("current"));if(!d){showError("Aucun brouillon enregistré sur ce navigateur.");if(draftEnabled)scheduleDraft();return}if(d.schema!==1||!d.identity||!Array.isArray(d.profiles)||!uniq(d.profiles)||d.profiles.some(p=>!P[p]))throw Error("Brouillon incompatible");
  if(!confirm("Reprendre le brouillon du "+new Date(d.savedAt).toLocaleString("fr-FR")+" ? Les données actuellement à l’écran seront remplacées et les signatures devront être recueillies à nouveau.")){if(draftEnabled)scheduleDraft();return}
  let file=null,source=null;if(d.file){const bytes=new Uint8Array(d.file.bytes);if(!bytes.length||bytes.length>30*1024*1024)throw Error("PDF du brouillon invalide");const {PDFDocument}=requirePdf(),pdf=await PDFDocument.load(bytes);if(!pdf.getPageCount())throw Error("PDF vide");const packet=decodePacket(pdf.getSubject());if(packet)source=validatePacket(packet);file={bytes,name:String(d.file.name),pages:pdf.getPageCount()}}
@@ -497,9 +503,49 @@ async function restoreDraft(){
  if(!identityMatch())T.verified=false;v6Undo=null;v6Profile=null;v6Situation={};v6Stage="identity";draftEnabled=true;draftDirty=false;draftMessage="Brouillon restauré · signatures à recueillir";renderTrainer();
  }catch(e){showError("Reprise impossible : "+e.message);if(draftEnabled)scheduleDraft()}
 }
-async function eraseDraft(){if(!confirm("Effacer définitivement le brouillon enregistré sur ce navigateur ? Le dossier affiché reste dans l’onglet."))return;draftEnabled=false;clearTimeout(draftTimer);draftTimer=null;try{await draftSerial.catch(()=>{});await dbAction("readwrite",s=>s.delete("current"));draftMessage="Brouillon local effacé · dossier en mémoire";draftLabel()}catch(e){draftMessage="Effacement impossible : "+e.message;draftLabel();showError(draftMessage)}}
-async function newTrainerDraft(){if(!confirm("Créer un nouveau dossier ? Les données en mémoire seront effacées. Le brouillon enregistré, s’il existe, reste disponible via Reprendre."))return;if(draftEnabled){await writeDraft();if(draftDirty){showError("Le brouillon n’a pas pu être enregistré. Le dossier est conservé à l’écran.");return}}draftEnabled=false;clearTimeout(draftTimer);leavingDraft=true;location.reload()}
+async function eraseDraft(){if(DEMO)return;if(!confirm("Effacer définitivement le brouillon enregistré sur ce navigateur ? Le dossier affiché reste dans l’onglet."))return;draftEnabled=false;clearTimeout(draftTimer);draftTimer=null;try{await draftSerial.catch(()=>{});await dbAction("readwrite",s=>s.delete("current"));draftMessage="Brouillon local effacé · dossier en mémoire";draftLabel()}catch(e){draftMessage="Effacement impossible : "+e.message;draftLabel();showError(draftMessage)}}
+async function newTrainerDraft(){if(DEMO){if(confirm("Réinitialiser le dossier fictif ?"))location.reload();return}if(!confirm("Créer un nouveau dossier ? Les données en mémoire seront effacées. Le brouillon enregistré, s’il existe, reste disponible via Reprendre."))return;if(draftEnabled){await writeDraft();if(draftDirty){showError("Le brouillon n’a pas pu être enregistré. Le dossier est conservé à l’écran.");return}}draftEnabled=false;clearTimeout(draftTimer);leavingDraft=true;location.reload()}
+
+/* Mode démonstration isolé : aucun import nominatif, aucun brouillon réel. */
+function installDemoControls(aside){
+ if(!DEMO){
+ const card=element("section","panel v6-test-entry",'<h3>Test technique</h3><p class="fine">Essayer la génération des PDF sur un dossier fictif sans respecter le nombre réel de situations.</p><a class="button secondary" href="formateur-test.html" target="_blank" rel="noopener">Ouvrir le mode test ↗</a>');
+ aside.append(card);return;
+ }
+ const banner=element("div","v6-demo-banner",'<strong>MODE TEST TECHNIQUE — DOCUMENTS FICTIFS</strong><span>1 situation minimum par symbole. Aucun avis ni PDF valable administrativement.</span><a class="button secondary" href="formateur.html" target="_blank" rel="noopener">Ouvrir le mode réel ↗</a>');A.prepend(banner);
+ for(const id of ["nom","prenom","groupe","entreprise","formateur","organisme"]){const el=$(id);if(el)el.readOnly=true}
+ const input=$("theoryFile");if(input){input.disabled=true;input.title="Mode test : PDF fictif fourni automatiquement."}
+ const remove=$("removeTheory");if(remove)remove.hidden=true;
+ const v=$("verified");if(v)v.disabled=true;
+ const panel=aside.querySelector(".v6-draft");if(panel)panel.hidden=true;
+ const name=$("headRight");if(name)name.textContent="MODE TEST";
+ const label=$("v6DraftState");if(label)label.textContent="Simulation locale · aucun enregistrement permanent";
+ const btn=$("generate");if(btn)btn.textContent="Générer le dossier PDF de test";
+ const btn2=$("generateAvis");if(btn2)btn2.textContent="Télécharger l’avis de test";
+}
+async function watermarkDemo(doc){
+ const {StandardFonts,rgb,degrees}=requirePdf(),font=await doc.embedFont(StandardFonts.HelveticaBold);
+ for(const page of doc.getPages()){const {width,height}=page.getSize();const size=Math.min(24,width/27);const text="DEMONSTRATION - SANS VALEUR ADMINISTRATIVE",sz=Math.min(12,(width-20)/font.widthOfTextAtSize(text,1));
+ page.drawRectangle({x:0,y:0,width,height:23,color:rgb(1,.94,.94)});
+ page.drawText(text,{x:(width-font.widthOfTextAtSize(text,sz))/2,y:7,size:sz,font,color:rgb(.72,.05,.12)});
+ page.drawText("SPECIMEN",{x:width*.18,y:height*.43,size:Math.min(66,width/8),font,color:rgb(.7,.08,.12),opacity:.16,rotate:degrees(31)});
+ }
+ doc.setTitle("DEMONSTRATION - document fictif sans valeur administrative");doc.setSubject("TEST TECHNIQUE - NE PAS TRANSMETTRE");
+}
+async function initDemo(){
+ Object.assign(T.identity,{nom:"DEMONSTRATION",prenom:"Apprenti fictif",groupe:"TEST TECHNIQUE",entreprise:"Entreprise fictive",organisme:"PROMEO - DEMO",lieu:"Beauvais",formateur:"Formateur fictif",fonction:"Formateur",dureeTheorie:"7 h",dureePratique:"3 h",stage:"Simulation - prévention du risque électrique",titresDemandes:"",dateTheorie:today(),datePratique:today()});
+ T.profiles=["BR"];T.verified=true;T.scopeNotes="Dossier fictif destiné exclusivement à vérifier le fonctionnement de l’application.";
+ T.external=Object.fromEntries(Object.keys(PRACTICE).map(p=>[p,{good:15,total:15,critical:"0"}]));
+ const g=gridFor("BR");g.situations[0].title="Mise en situation fictive de test";g.situations[0].criteria.forEach(c=>c.mark="A");g.opinion="favorable";
+ const {PDFDocument,StandardFonts,rgb}=requirePdf();const doc=await PDFDocument.create(),font=await doc.embedFont(StandardFonts.Helvetica),page=doc.addPage([595.28,841.89]);
+ page.drawText("RESULTAT THEORIQUE FICTIF - TEST TECHNIQUE",{x:35,y:785,size:14,font,color:rgb(.2,.2,.2)});
+ page.drawText("Apprenti fictif / 15 sur 15 simules par symbole",{x:35,y:745,size:12,font});
+ page.drawText("Aucune evaluation theorique reelle n'a ete effectuee.",{x:35,y:715,size:12,font});
+ await watermarkDemo(doc);T.file={name:"THEORIE_FICTIVE_TEST.pdf",bytes:await doc.save(),pages:doc.getPageCount()};T.source=null;T.importMessage="PDF de théorie fictif généré pour le test. Aucun résultat réel.";
+ v6Stage="practice";renderTrainer();
+}
+
 function initTheme(){let mode="dark";try{const saved=localStorage.getItem("blackout-hab-v6-theme");if(["light","dark"].includes(saved))mode=saved}catch{}function apply(){document.documentElement.dataset.theme=mode;const b=$("themeToggle");if(b){b.textContent=mode==="dark"?"☀ Clair":"☾ Sombre";b.setAttribute("aria-label",mode==="dark"?"Activer le thème clair":"Activer le thème sombre")}}apply();const b=$("themeToggle");if(b)b.onclick=()=>{mode=mode==="dark"?"light":"dark";try{localStorage.setItem("blackout-hab-v6-theme",mode)}catch{}apply()}}
 
-initTheme();if(MODE==="theorie"){restore();renderTheory();setInterval(updateClock,500)}else if(MODE==="formateur"){renderTrainer();window.addEventListener("beforeunload",e=>{if(!leavingDraft&&(draftDirty||(!draftEnabled&&(T.file||T.profiles.length||T.identity.nom)))){e.preventDefault();e.returnValue=""}})}else A.textContent="Lien invalide.";
+initTheme();if(MODE==="theorie"){restore();renderTheory();setInterval(updateClock,500)}else if(MODE==="formateur"){if(DEMO){initDemo().catch(e=>{A.textContent="Impossible de préparer le dossier fictif : "+e.message})}else renderTrainer();window.addEventListener("beforeunload",e=>{if(!DEMO&&!leavingDraft&&(draftDirty||(!draftEnabled&&(T.file||T.profiles.length||T.identity.nom)))){e.preventDefault();e.returnValue=""}})}else A.textContent="Lien invalide.";
 })();

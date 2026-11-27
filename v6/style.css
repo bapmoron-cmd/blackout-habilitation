@@ -35,3 +35,5 @@ body[data-mode=theorie] main{max-width:1080px}body[data-mode=theorie] .examgrid{
 
 /* V6.0.2 : clôture distincte du résultat */
 .v6-steps .step-negative small{color:var(--bad);font-weight:700}.v6-review-state{padding:10px 0}.v6-review-state p{margin:6px 0 0}
+/* Mode de test technique */
+.v6-demo-banner{position:sticky;top:74px;z-index:19;display:flex;flex-wrap:wrap;align-items:center;gap:10px;background:#5a3519;color:#fff0d5;border:1px solid #f1b457;border-radius:10px;padding:12px 16px;margin-bottom:14px}.v6-demo-banner span{font-size:13px;flex:1}.v6-demo-banner .button{min-height:34px;padding:6px 10px}.v6-test-entry .button{width:100%;font-size:12px}body[data-demo=true] .v6-steps{position:static}body[data-demo=true] .v6-sidebar{top:155px}@media(max-width:780px){.v6-demo-banner{top:63px;position:static}}
