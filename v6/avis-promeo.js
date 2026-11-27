@@ -28,13 +28,14 @@ function sameRequested(request,profiles){
  return a.length===b.length&&a.every((x,i)=>x===b[i]);
 }
 function decision(request,profiles){
- const positive=profiles.filter(p=>p.opinion==="favorable"),negative=profiles.filter(p=>p.opinion==="defavorable");
+ const positive=profiles.filter(p=>p.opinion==="favorable"),negative=profiles.filter(p=>p.opinion==="defavorable"),conditional=profiles.filter(p=>p.opinion==="reserve");
  const exact=sameRequested(request,profiles),ok=exact&&positive.length===profiles.length&&profiles.length>0;
  const rejected=exact&&negative.length>0;
  let other="";
  if(!exact)other=positive.length?"Avis favorable limité aux symboles évalués suivants : "+positive.map(p=>p.name).join(", ")+". Autres titres demandés : hors périmètre de cet avis.":"Aucun symbole évalué n’est proposé ; la demande de l’entreprise diffère du périmètre évalué.";
  else if(rejected&&positive.length)other="Proposition limitée aux symboles suivants : "+positive.map(p=>p.name).join(", ")+".";
- return {ok,rejected,other,positive,negative,exact};
+ if(conditional.length)other=(other?other+" ":"")+"Avis du formateur sous réserve du minimum de situations : "+conditional.map(p=>p.name).join(", ")+". Proposition suspendue jusqu’à validation par le référent habilitation."+(positive.length&&!other?" Symboles proposés : "+positive.map(p=>p.name).join(", ")+".":"");
+ return {ok,rejected,other,positive,negative,conditional,exact};
 }
 function tableRows(positive){
  return groups.map(group=>({title:group.title,rows:group.rows.flatMap(([key,name])=>{
