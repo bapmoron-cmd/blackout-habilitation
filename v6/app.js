@@ -124,6 +124,7 @@ let T={identity:{nom:"",prenom:"",groupe:"",entreprise:"",organisme:"PROMEO",lie
 function signatureSnapshot(){return JSON.stringify({identity:T.identity,profiles:T.profiles,practice:T.profiles.map(p=>[p,gridFor(p)]),external:T.external,verified:T.verified,scopeNotes:T.scopeNotes,source:T.source?.packet.id||null,file:T.file?[T.file.name,T.file.bytes.length,T.file.pages]:null})}
 function validSignature(role){const s=T.signatures[role];return T.reviewed&&s?.png?.startsWith("data:image/png;base64,")&&s.snapshot===signatureSnapshot()?s:null}
 function invalidateSignatureReview(){
+ if(DEMO)clearQuickArtifacts();
  T.reviewed=false;T.signatures={trainer:null,learner:null};
  const review=$("reviewed");if(review)review.checked=false;
  for(const role of ["trainer","learner"]){const canvas=$("signature-"+role);if(canvas?.resetPad)canvas.resetPad()}
@@ -332,7 +333,7 @@ function avisPayload(signature){
 }
 
 function updateOverall(){refreshWorkspace();refreshPracticeTabs();scheduleDraft();if($("avisPreview"))$("avisPreview").textContent=avisStatus();const el=$("overallStatus");if(!el)return;const fav=T.profiles.filter(p=>gridFor(p).opinion==="favorable"&&gridStatus(p).possible).length;el.textContent=T.profiles.length+" symbole(s) · "+fav+" avis favorable(s) · "+(T.file?"PDF théorique joint":"PDF théorique absent")+" · "+(validSignature("trainer")?"Formateur signé":"Signature formateur requise");refreshSignatureUI()}
-async function trainerPDF(onlyAvis=false){
+async function trainerPDF(onlyAvis=false,returnBytes=false){
  if(!T.file)throw Error("Importez le PDF théorique avant de générer le dossier final.");
  if(!T.profiles.length)throw Error("Sélectionnez au moins un symbole.");
  const req=["nom","prenom","groupe","entreprise","organisme","lieu","formateur","fonction","dateTheorie","datePratique","dureeTheorie","dureePratique","stage"];
@@ -344,7 +345,7 @@ async function trainerPDF(onlyAvis=false){
  validateAvis();
  const i=T.identity,ref=T.source?.packet.id||("EXT-"+Date.now().toString(36).toUpperCase());
  const avisDoc=await window.HAB_AVIS.create(avisPayload(trainerSigned),requirePdf());
- if(onlyAvis){if(DEMO)await watermarkDemo(avisDoc);download(await avisDoc.save(),(DEMO?"DEMONSTRATION_":"")+"AVIS_PROMEO_"+safeName(i.nom)+"_"+safeName(i.prenom)+".pdf");return}
+ if(onlyAvis){if(DEMO)await watermarkDemo(avisDoc);const bytes=await avisDoc.save(),name=(DEMO?"DEMONSTRATION_":"")+"AVIS_PROMEO_"+safeName(i.nom)+"_"+safeName(i.prenom)+".pdf";if(returnBytes)return {bytes,name};download(bytes,name);return}
  const b=await pdfBuilder("Dossier des évaluations","Annexes théorie et pratique / avis signé",ref);
  b.doc.setTitle("Avis après formation - "+i.nom+" "+i.prenom);b.doc.setAuthor(i.organisme);b.doc.setSubject("Avis après formation préalable à l'habilitation électrique - V5 pilote");
  b.heading("01 / Identification de l'apprenti et de la formation");
@@ -367,7 +368,7 @@ async function trainerPDF(onlyAvis=false){
  const {PDFDocument}=requirePdf(),original=await PDFDocument.load(T.file.bytes),pages=await b.doc.copyPages(original,original.getPageIndices());pages.forEach(p=>b.doc.addPage(p));
  const avisPages=await b.doc.copyPages(avisDoc,avisDoc.getPageIndices());avisPages.forEach((p,i)=>b.doc.insertPage(i,p));
  if(DEMO)await watermarkDemo(b.doc);
- download(await b.doc.save(),(DEMO?"DEMONSTRATION_":"")+"AVIS_HABILITATION_"+safeName(i.nom)+"_"+safeName(i.prenom)+"_"+ref+".pdf");
+ const bytes=await b.doc.save(),name=(DEMO?"DEMONSTRATION_":"")+"AVIS_HABILITATION_"+safeName(i.nom)+"_"+safeName(i.prenom)+"_"+ref+".pdf";if(returnBytes)return {bytes,name};download(bytes,name);
 }
 
 /* V6 : navigation et ergonomie, sans changement des grilles ni des barèmes. */
@@ -513,6 +514,8 @@ function installDemoControls(aside){
  aside.append(card);return;
  }
  const banner=element("div","v6-demo-banner",'<strong>MODE TEST TECHNIQUE — DOCUMENTS FICTIFS</strong><span>1 situation minimum par symbole. Aucun avis ni PDF valable administrativement.</span><a class="button secondary" href="formateur.html" target="_blank" rel="noopener">Ouvrir le mode réel ↗</a>');A.prepend(banner);
+ const quick=element("section","panel v6-quicktest",'<div><h2>Vérifier les PDF sans ressaisie</h2><p class="fine">Teste l’avis PROMEO et le dossier complet de la simulation courante avec un visa de test temporaire. Les notes restent inchangées. Pour vérifier le tracé manuscrit, utilisez aussi le parcours normal.</p></div><button type="button" class="primary" id="v6QuickPdf">Tester les deux PDF</button><p id="v6QuickResult" role="status" class="fine"></p><div id="v6QuickDownloads" class="toolbar" hidden></div>');banner.after(quick);
+ $("v6QuickPdf").onclick=()=>actionPDF($("v6QuickPdf"),quickPdfTest);
  for(const id of ["nom","prenom","groupe","entreprise","formateur","organisme"]){const el=$(id);if(el)el.readOnly=true}
  const input=$("theoryFile");if(input){input.disabled=true;input.title="Mode test : PDF fictif fourni automatiquement."}
  const remove=$("removeTheory");if(remove)remove.hidden=true;
@@ -523,6 +526,37 @@ function installDemoControls(aside){
  const btn=$("generate");if(btn)btn.textContent="Générer le dossier PDF de test";
  const btn2=$("generateAvis");if(btn2)btn2.textContent="Télécharger l’avis de test";
 }
+
+/* Contrôle technique explicite, accessible exclusivement dans la page fictive. */
+let quickArtifacts=null;
+function clearQuickArtifacts(){
+ quickArtifacts=null;const links=$("v6QuickDownloads"),out=$("v6QuickResult");if(links){links.replaceChildren();links.hidden=true}if(out)out.textContent="";
+}
+function simulatedVisa(){
+ if(!DEMO)throw Error("Visa simulé interdit en mode réel.");
+ const canvas=document.createElement("canvas");canvas.width=620;canvas.height=180;
+ const ctx=canvas.getContext("2d");ctx.fillStyle="#a42535";ctx.font="bold 50px sans-serif";ctx.fillText("VISA FICTIF",25,78);ctx.font="25px sans-serif";ctx.fillText("TEST TECHNIQUE UNIQUEMENT",25,125);
+ return {png:canvas.toDataURL("image/png"),at:new Date().toISOString(),snapshot:signatureSnapshot()};
+}
+async function quickPdfTest(){
+ if(!DEMO)throw Error("Fonction disponible uniquement en mode test.");
+ clearQuickArtifacts();
+ const previous={reviewed:T.reviewed,signatures:T.signatures};const wasInert=A.inert;
+ try{
+  validateAvis();A.inert=true;T.reviewed=true;T.signatures={trainer:simulatedVisa(),learner:null};
+  const first=await trainerPDF(true,true),second=await trainerPDF(false,true);
+  const {PDFDocument}=requirePdf();
+  const a=await PDFDocument.load(first.bytes),b=await PDFDocument.load(second.bytes);
+  if(!a.getPageCount()||b.getPageCount()<=a.getPageCount())throw Error("Contrôle de pagination : dossier complet incohérent.");
+  if(a.getSubject()!=="TEST TECHNIQUE - NE PAS TRANSMETTRE"||b.getSubject()!==a.getSubject())throw Error("Marquage de démonstration absent.");
+  quickArtifacts={first,second};const result=$("v6QuickResult"),links=$("v6QuickDownloads");
+  result.textContent="Contrôle réussi : avis ("+a.getPageCount()+" page(s)) et dossier ("+b.getPageCount()+" page(s)) générés et relus par le moteur PDF. Documents fictifs uniquement.";
+  result.className="success";links.hidden=false;
+  for(const [label,record] of [["Télécharger l’avis de test",first],["Télécharger le dossier de test",second]]){const btn=document.createElement("button");btn.type="button";btn.className="secondary";btn.textContent=label;btn.onclick=()=>download(record.bytes,record.name);links.append(btn)}
+ }catch(e){const out=$("v6QuickResult");if(out){out.textContent="Échec du contrôle PDF : "+e.message;out.className="error"}throw e}
+ finally{T.reviewed=previous.reviewed;T.signatures=previous.signatures;A.inert=wasInert;refreshSignatureUI();refreshWorkspace()}
+}
+
 async function watermarkDemo(doc){
  const {StandardFonts,rgb,degrees}=requirePdf(),font=await doc.embedFont(StandardFonts.HelveticaBold);
  for(const page of doc.getPages()){const {width,height}=page.getSize();const size=Math.min(24,width/27);const text="DEMONSTRATION - SANS VALEUR ADMINISTRATIVE",sz=Math.min(12,(width-20)/font.widthOfTextAtSize(text,1));
