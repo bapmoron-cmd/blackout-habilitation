@@ -104,7 +104,7 @@ async function create(d,PDFLib,{preview=false}={}){
  const signX=M+230, signW=R-signX;
  const titleLines=wrap("Responsable de formation maintenance",signW,bold,9.1);titleLines.forEach((l,i)=>center(l,signX,signW,y+i*11,9.1,bold));
  let sy=y+titleLines.length*11+2;const nameLines=wrap(d.formateur+" - "+d.fonction,signW,font,8.7);nameLines.forEach((l,i)=>center(l,signX,signW,sy+i*10,8.7));sy+=nameLines.length*10+2;
- if(preview){need(38);box(signX,sy,signW,28);center("Signature à recueillir - brouillon",signX,signW,sy+8,8.5,font)}else{
+ if(preview){if(sy+38>H-32){start();paragraph("Signature du responsable / signataire de l’avis",{f:bold});paragraph(d.formateur+" - "+d.fonction);sy=y}box(signX,sy,signW,28);center("Signature à recueillir - brouillon",signX,signW,sy+8,8.5,font)}else{
  const sc=Math.min(160/sig.width,29/sig.height);const iw=sig.width*sc,ih=sig.height*sc;
  if(sy+ih+10>H-32){start();paragraph("Signature du responsable / signataire de l’avis",{f:bold});paragraph(d.formateur+" - "+d.fonction);paragraph(d.lieu+", le "+signedDate);sy=y;page.drawImage(sig,{x:M,y:H-sy-ih,width:iw,height:ih});draw("Signature manuscrite numérisée",M,sy+ih+1,7,font,gray)}
  else{page.drawImage(sig,{x:signX+(signW-iw)/2,y:H-sy-ih,width:iw,height:ih});center("Signature manuscrite numérisée",signX,signW,sy+ih+1,7,font)}}
