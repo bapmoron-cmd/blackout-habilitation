@@ -9,3 +9,5 @@
 
 /* V5.3 avis PROMEO */
 .avis-scope{margin:14px 0;border:1px solid var(--line);border-radius:10px;padding:12px}.avis-scope summary{font-weight:700;cursor:pointer}.avis-scope .grid{margin-top:12px}.avis-scope textarea{min-height:75px}#avisPreview{white-space:normal;overflow-wrap:anywhere}
+/* V5.3.2 : suppression de toute mise en situation */
+.remove-situation{color:#a82e35;border-color:#dda7aa;margin-top:10px}.remove-situation:hover{background:#fff1f1;border-color:#a82e35}
