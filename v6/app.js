@@ -76,19 +76,75 @@ function validatePacket(o){
 }
 function requirePdf(){if(!window.PDFLib)throw Error("Le moteur PDF n’a pas pu charger. Vérifiez la connexion Internet et actualisez la page.");return window.PDFLib}
 function normalizePDF(t){return String(t??"").replace(/[’‘]/g,"'").replace(/[“”]/g,'"').replace(/[–—−]/g,"-").replace(/…/g,"...").replace(/œ/g,"oe").replace(/Œ/g,"OE").replace(/\u202f/g," ").replace(/[^\x20-\x7e\xa0-\xff\n]/g," ")}
+
 async function pdfBuilder(title,subtitle,reference){
- const {PDFDocument,StandardFonts,rgb}=requirePdf(),doc=await PDFDocument.create(),font=await doc.embedFont(StandardFonts.Helvetica),bold=await doc.embedFont(StandardFonts.HelveticaBold),ink=rgb(.08,.16,.23),teal=rgb(0,.43,.47),muted=rgb(.31,.39,.45),light=rgb(.93,.96,.97);
- let page,y,pageNumber=0;const W=595.28,H=841.89,M=44,usable=W-M*2;
- function newPage(){page=doc.addPage([W,H]);pageNumber++;page.drawRectangle({x:0,y:H-93,width:W,height:93,color:ink});page.drawText("BLACKOUT  /  HABILITATION ELECTRIQUE",{x:M,y:H-30,size:10,font:bold,color:rgb(.37,.86,.81)});page.drawText(normalizePDF(title),{x:M,y:H-54,size:17,font:bold,color:rgb(1,1,1)});page.drawText(normalizePDF(subtitle).slice(0,100),{x:M,y:H-74,size:9,font,color:rgb(.82,.92,.93)});page.drawRectangle({x:M,y:38,width:usable,height:.6,color:muted});page.drawText("V5 PILOTE - "+normalizePDF(reference).slice(0,62),{x:M,y:24,size:8,font,color:muted});page.drawText(String(pageNumber),{x:W-M-17,y:24,size:8,font,color:muted});y=H-117}
- function ensure(h){if(y-h<58)newPage()}
- function wrap(txt,f,size,max){const lines=[];for(const para of normalizePDF(txt).split("\n")){let line="";for(let word of para.split(/\s+/).filter(Boolean)){while(f.widthOfTextAtSize(word,size)>max){let cut=word.length-1;while(cut>1&&f.widthOfTextAtSize(word.slice(0,cut),size)>max)cut--;if(line){lines.push(line);line=""}lines.push(word.slice(0,cut));word=word.slice(cut)}const next=line?line+" "+word:word;if(f.widthOfTextAtSize(next,size)>max){if(line)lines.push(line);line=word}else line=next}lines.push(line||" ")}return lines}
- function text(txt,{size=10,weight=false,color=ink,indent=0,gap=6}={}){const f=weight?bold:font,lines=wrap(txt,f,size,usable-indent);for(const l of lines){ensure(size+6);page.drawText(l,{x:M+indent,y:y-size,size,font:f,color});y-=size+4}y-=gap}
- function heading(txt){ensure(48);page.drawRectangle({x:M,y:y-22,width:usable,height:24,color:light});page.drawText(normalizePDF(txt).slice(0,85),{x:M+8,y:y-15,size:11,font:bold,color:teal});y-=31}
- function section(txt){ensure(43);text(txt,{size:13,weight:true,color:teal,gap:5})}
+ const {PDFDocument,StandardFonts,rgb}=requirePdf(),doc=await PDFDocument.create(),font=await doc.embedFont(StandardFonts.Helvetica),bold=await doc.embedFont(StandardFonts.HelveticaBold);
+ const ink=rgb(.08,.16,.23),teal=rgb(0,.39,.42),muted=rgb(.29,.37,.43),white=rgb(1,1,1),line=rgb(.83,.88,.91);
+ const palette={
+ neutral:{fg:muted,bg:rgb(.94,.96,.97)},good:{fg:rgb(.07,.37,.25),bg:rgb(.89,.96,.92)},info:{fg:rgb(.10,.33,.52),bg:rgb(.90,.94,.98)},
+ warn:{fg:rgb(.54,.34,.02),bg:rgb(1,.95,.84)},bad:{fg:rgb(.62,.13,.20),bg:rgb(.99,.90,.91)}
+ };
+ let page,y,pageNumber=0;const W=595.28,H=841.89,M=42,usable=W-M*2;
+ function wrap(txt,f,size,max){
+  const lines=[];
+  for(const para of normalizePDF(txt).split("\n")){
+   let current="";for(let word of para.split(/\s+/).filter(Boolean)){
+    while(f.widthOfTextAtSize(word,size)>max&&word.length>1){let cut=word.length-1;while(cut>1&&f.widthOfTextAtSize(word.slice(0,cut),size)>max)cut--;if(current){lines.push(current);current=""}lines.push(word.slice(0,cut));word=word.slice(cut)}
+    const next=current?current+" "+word:word;if(f.widthOfTextAtSize(next,size)>max&&current){lines.push(current);current=word}else current=next;
+   }lines.push(current||" ");
+  }return lines.length?lines:[" "]
+ }
+ function draw(txt,x,top,size=10,f=font,color=ink){page.drawText(normalizePDF(txt),{x,y:top-size,size,font:f,color})}
+ function rule(top){page.drawRectangle({x:M,y:top,width:usable,height:.7,color:line})}
+ function newPage(){
+  page=doc.addPage([W,H]);pageNumber++;page.drawRectangle({x:0,y:H-104,width:W,height:104,color:ink});page.drawRectangle({x:0,y:H-104,width:7,height:104,color:rgb(.26,.77,.75)});
+  draw("BLACKOUT  /  HABILITATION ELECTRIQUE",M,H-19,9,bold,rgb(.41,.88,.85));
+  let t=H-38;for(const l of wrap(title,bold,17,usable)){draw(l,M,t,17,bold,white);t-=20}
+  for(const l of wrap(subtitle,font,8.5,usable).slice(0,2)){draw(l,M,t-2,8.5,font,rgb(.81,.90,.94));t-=11}
+  rule(37);draw("DOSSIER V6.1  |  "+String(reference).slice(0,55),M,28,7.5,font,muted);draw("Evaluation - "+pageNumber,W-M-68,28,7.5,font,muted);y=H-124
+ }
+ function ensure(h){if(y-h<51)newPage()}
+ function text(txt,{size=10,weight=false,color=ink,indent=0,gap=6}={}){
+  const f=weight?bold:font,lines=wrap(txt,f,size,usable-indent);
+  for(const l of lines){ensure(size+5);draw(l,M+indent,y,size,f,color);y-=size+4}y-=gap
+ }
+ function heading(txt){const ls=wrap(txt,bold,12,usable-24);const h=ls.length*15+15;ensure(h+35);page.drawRectangle({x:M,y:y-h,width:usable,height:h,color:palette.info.bg});page.drawRectangle({x:M,y:y-h,width:3,height:h,color:teal});ls.forEach((l,i)=>draw(l,M+12,y-7-i*15,12,bold,teal));y-=h+10}
+ function section(txt){ensure(39);text(txt,{size:12.5,weight:true,color:teal,gap:5})}
  function space(h=8){ensure(h);y-=h}
- async function signature(label,name,signed){ensure(146);text(label,{weight:true,size:11,gap:3});text(name,{size:10,gap:3});const at=signed?new Date(signed.at).toLocaleString("fr-FR",{dateStyle:"short",timeStyle:"short",timeZone:"Europe/Paris"}):"Non signée";text(signed?"Signature tracée le "+at+" (heure de Paris)":"Signature facultative non renseignée",{size:9,color:muted,gap:4});ensure(82);page.drawRectangle({x:M,y:y-70,width:usable,height:70,borderColor:muted,borderWidth:.6});if(signed){const image=await doc.embedPng(signed.png),scale=Math.min((usable-20)/image.width,56/image.height),w=image.width*scale,h=image.height*scale;page.drawImage(image,{x:M+10,y:y-35-h/2,width:w,height:h})}y-=82}
- newPage();return {doc,text,heading,section,space,signature,newPage};
+ function callout(label,txt,tone="neutral"){
+  const c=palette[tone]||palette.neutral,ls=wrap(txt,font,9.4,usable-24);
+  let i=0;while(i<ls.length){ensure(55);const count=Math.max(1,Math.min(ls.length-i,Math.floor((y-51-34)/13))),h=34+count*13;
+   page.drawRectangle({x:M,y:y-h,width:usable,height:h,color:c.bg});page.drawRectangle({x:M,y:y-h,width:3,height:h,color:c.fg});draw(label+(i?" (suite)":""),M+12,y-8,10,bold,c.fg);
+   for(let j=0;j<count;j++)draw(ls[i+j],M+12,y-24-j*13,9.4,font,ink);y-=h+9;i+=count
+  }
+ }
+ function metrics(items){
+  if(!items.length)return;const n=items.length,gap=8,w=(usable-gap*(n-1))/n,h=62;ensure(h+14);
+  items.forEach((a,i)=>{const c=palette[a.tone]||palette.neutral,x=M+i*(w+gap);page.drawRectangle({x,y:y-h,width:w,height:h,color:c.bg});page.drawRectangle({x,y:y-h,width:3,height:h,color:c.fg});draw(a.value,x+10,y-9,20,bold,c.fg);const ls=wrap(a.label,font,8,w-20);ls.slice(0,2).forEach((l,j)=>draw(l,x+10,y-35-j*10,8,font,muted))});y-=h+12
+ }
+ // Row backgrounds communicate the result; long cells split safely, with repeated headers.
+ function table(headers,fractions,rows){
+  const widths=fractions.map(f=>usable*f),xs=widths.map((_,i)=>M+widths.slice(0,i).reduce((a,b)=>a+b,0)),size=9,lead=12,pad=7;
+  function head(){const lines=headers.map((h,i)=>wrap(h,bold,8.2,widths[i]-2*pad)),h=Math.max(...lines.map(l=>l.length))*11+12;ensure(h+35);page.drawRectangle({x:M,y:y-h,width:usable,height:h,color:ink});lines.forEach((ls,i)=>ls.forEach((l,k)=>draw(l,xs[i]+pad,y-6-k*11,8.2,bold,white)));y-=h}
+  if(!rows.length){text("Aucun élément.",{color:muted});return}
+  head();
+  for(const [ri,row] of rows.entries()){
+   const c=palette[row.tone]||palette.neutral,ls=row.cells.map((v,i)=>wrap(v??"-",i===0||i===row.emphasis?bold:font,size,widths[i]-2*pad)),max=Math.max(...ls.map(a=>a.length));let offset=0;
+   while(offset<max){if(y-51<lead+2*pad){newPage();head()}
+    const n=Math.max(1,Math.min(max-offset,Math.floor((y-51-2*pad)/lead))),h=n*lead+2*pad;
+    page.drawRectangle({x:M,y:y-h,width:usable,height:h,color:row.tone?c.bg:ri%2?palette.neutral.bg:white});
+    if(row.tone)page.drawRectangle({x:M,y:y-h,width:3,height:h,color:c.fg});
+    ls.forEach((arr,i)=>arr.slice(offset,offset+n).forEach((l,j)=>draw(l,xs[i]+pad,y-pad-j*lead,size,i===0||i===row.emphasis?bold:font,i===row.emphasis?c.fg:ink)));
+    y-=h;rule(y);offset+=n;if(offset<max){newPage();head()}
+   }
+  }y-=12
+ }
+ async function signature(label,name,signed){
+  ensure(145);section(label);text(name,{size:10,gap:2});const at=signed?new Date(signed.at).toLocaleString("fr-FR",{dateStyle:"short",timeStyle:"short",timeZone:"Europe/Paris"}):"Non signée";text(signed?"Signature tracée le "+at+" (heure de Paris)":"Signature facultative non renseignée",{size:9,color:muted,gap:3});ensure(80);page.drawRectangle({x:M,y:y-66,width:usable,height:66,borderColor:line,borderWidth:.8});if(signed){const image=await doc.embedPng(signed.png),scale=Math.min((usable-20)/image.width,52/image.height),w=image.width*scale,h=image.height*scale;page.drawImage(image,{x:M+10,y:y-33-h/2,width:w,height:h})}y-=78
+ }
+ newPage();return {doc,text,heading,section,space,signature,newPage,metrics,callout,table};
 }
+
 function download(bytes,name){const blob=new Blob([bytes],{type:"application/pdf"}),url=URL.createObjectURL(blob),link=document.createElement("a");link.href=url;link.download=name;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),10000)}
 async function actionPDF(button,fn){button.disabled=true;const label=button.textContent;button.textContent="Création du PDF…";try{await fn();if($("error"))$("error").textContent=""}catch(e){showError(e.message||e)}finally{button.disabled=false;button.textContent=label}}
 function identityLine(i){return i.nom+" "+i.prenom+"  |  Groupe : "+i.groupe}
@@ -427,6 +483,100 @@ function avisPayload(signature){
 }
 
 function updateOverall(){refreshWorkspace();refreshPracticeTabs();scheduleDraft();if($("avisPreview"))$("avisPreview").textContent=avisStatus();const el=$("overallStatus");if(!el)return;const fav=avisProfiles().filter(p=>p.opinion==="favorable").length;el.textContent=T.profiles.length+" symbole(s) · "+fav+" avis favorable(s) · "+(T.file?"PDF théorique joint":"PDF théorique absent")+" · "+(validSignature("trainer")?"Formateur signé":"Signature formateur requise");refreshSignatureUI()}
+
+/* V6.1 : une seule source de vérité pour les synthèses visuelles. */
+const gradeTone={A:"good",B:"info",C:"warn",D:"bad","":"neutral"};
+function situationReportText(z){
+ if(!z.started)return "Non commencée.";
+ const c=z.counts;return c.A+" A (sans erreur), "+c.B+" B (erreurs acceptables), "+c.C+" C (erreurs majeures), "+c.D+" D (erreurs graves), "+c.unseen+" non renseigné(s). "+(z.failed?"Critères d’acceptation non satisfaits.":z.pass?"Critères d’acceptation satisfaits pour cette situation.":"Évaluation non achevée.");
+}
+function evaluationEvidence(){
+ return T.profiles.map(p=>{
+  const g=gridFor(p),s=gridStatus(p),r=s.r;let index=0;
+  const situations=g.situations.flatMap((sit,j)=>s.situations[j].started?[{sit,z:s.situations[j],number:++index}]:[]);
+  const entries=situations.flatMap(({sit,number})=>sit.criteria.map(c=>({number,title:sit.title,criterion:c.text,mark:c.mark,note:c.note})));
+  const theoryErrors=r?.detail?.filter(d=>!d.ok).map(d=>{const q=Q[d.id];return {question:q?.question||d.id,given:d.selected.map(k=>q?.options[k]?.text||"Réponse indisponible").join(" ; ")||"Sans réponse",expected:d.correct.map(k=>q?.options[k]?.text||"Réponse indisponible").join(" ; "),critical:d.critical}})||[];
+  return {p,name:get(p),g,s,r,situations,entries,theoryErrors,hasTheoryDetail:Array.isArray(r?.detail)};
+ })
+}
+function evidenceTotals(items){
+ const total={good:0,questions:0,theoryAvailable:0,critical:0,criticalUnknown:0,completed:0,started:0,failed:0,A:0,B:0,C:0,D:0,unseen:0,fav:0,negative:0};
+ for(const e of items){if(e.r){total.good+=e.r.good;total.questions+=e.r.total;total.theoryAvailable++;if(e.r.critical===null)total.criticalUnknown++;else total.critical+=e.r.critical}
+ total.completed+=e.s.completedCount;total.started+=e.s.startedCount;total.failed+=e.situations.filter(x=>x.z.failed).length;for(const k of ["A","B","C","D","unseen"])total[k]+=e.s.counts[k];if(e.g.opinion==="favorable"&&e.s.possible)total.fav++;if(e.g.opinion==="defavorable")total.negative++}
+ return total
+}
+function evidenceComment(p){
+ const e=evaluationEvidence().find(x=>x.p===p);if(!e)return "";
+ const {s,r}=e;return (r?"Théorie : "+r.good+"/"+r.total+" ("+r.pct+" %), "+theoryLabel(r).toLowerCase()+". ":"Théorie non renseignée. ")+s.completedCount+" situation(s) entièrement évaluée(s), "+e.situations.filter(x=>x.z.pass).length+" satisfaisante(s). Indicateurs : "+s.counts.A+" A, "+s.counts.B+" B, "+s.counts.C+" C, "+s.counts.D+" D, "+s.counts.unseen+" non renseigné(s)."+(s.failed?" Critères pratiques non satisfaits sur au moins une situation.":"")+(s.completedCount<s.referenceMinimum?" Minimum indiqué dans la grille : "+s.referenceMinimum+" ; nombre réalisé inférieur.":"");
+}
+function practiceTone(s){return s.failed?"bad":s.practicePassed?(s.reduced?"warn":"good"):"neutral"}
+function theoryTone(r){return !r?"neutral":r.critical===null?"warn":r.passed?"good":"bad"}
+function opinionTone(e){return e.g.opinion==="defavorable"?"bad":e.g.opinion==="favorable"&&e.s.possible?"good":"warn"}
+function situationResult(z){return z.failed?"NON REUSSIE":z.pass?"SATISFAISANTE":"NON ACHEVEE"}
+function reportSummary(b,items,draft){
+ const i=T.identity,t=evidenceTotals(items);
+ b.heading("01 / Synthèse du dossier");if(draft)b.callout("BROUILLON NON SIGNE","Aucun avis administratif émis. Données provisoires ; ne pas transmettre.","warn");
+ b.text([i.nom,i.prenom].filter(Boolean).join(" ")||"Identité non renseignée",{weight:true,size:19,gap:5});
+ b.text([i.groupe,i.entreprise].filter(Boolean).join("  |  ")||"Groupe / entreprise non renseignés",{size:11,gap:10});
+ b.table(["Formation","Informations"],[.28,.72],[
+ {cells:["Organisme / lieu",[i.organisme,i.lieu].filter(Boolean).join(" - ")||"Non renseigné"]},
+ {cells:["Intitulé / type",[i.stage,i.type].filter(Boolean).join(" - ")]},
+ {cells:["Théorie",dateFmt(i.dateTheorie)+" | "+(i.dureeTheorie||"Durée non renseignée")]},
+ {cells:["Pratique",dateFmt(i.datePratique)+" | "+(i.dureePratique||"Durée non renseignée")]},
+ {cells:["Formateur",[i.formateur,i.fonction].filter(Boolean).join(" - ")||"Non renseigné"]}]);
+ b.metrics([{value:t.theoryAvailable?t.good+"/"+t.questions:"-",label:"Bonnes réponses (résultats disponibles)",tone:t.questions&&t.good===t.questions?"good":"info"},{value:String(t.completed),label:"Situations entièrement évaluées",tone:"info"},{value:String(t.C),label:"Erreurs majeures (C)",tone:t.C?"warn":"neutral"},{value:String(t.D),label:"Erreurs graves (D)",tone:t.D?"bad":"neutral"}]);
+ b.table(["Symbole","Théorie","Pratique réalisée","Avis formateur"+(draft?" (saisi)":"")],[.20,.24,.30,.26],items.map(e=>({cells:[e.name,e.r?e.r.good+"/"+e.r.total+" ("+e.r.pct+" %)\n"+theoryLabel(e.r)+"\nCritiques : "+(e.r.critical??"non renseigné"):"Non renseignée",e.s.completedCount+" réalisée(s) / "+e.s.referenceMinimum+" minimum grille\n"+practiceResult(e.s),opinionLabel(e.p)],tone:opinionTone(e),emphasis:3})));
+ if(t.theoryAvailable<items.length||t.criticalUnknown)b.callout("Données théoriques manquantes","Résultats disponibles pour "+t.theoryAvailable+"/"+items.length+" symbole(s). Erreurs critiques non renseignées : "+t.criticalUnknown+" parcours.","warn");
+ b.text("Les notes A/B/C/D et les résultats théoriques sont distincts de l'avis final. Une situation est satisfaisante avec au plus un C, aucun D et tous ses indicateurs renseignés. Le nombre effectué reste distinct du minimum de la grille.",{size:9});
+}
+function reportConclusion(b,items,draft,fav){
+ const t=evidenceTotals(items);
+ b.newPage();b.heading("02 / Conclusion et points de vigilance");
+ b.metrics(["A","B","C","D"].map(k=>({value:String(t[k]),label:k+" - "+marks[k],tone:gradeTone[k]})));
+ b.callout("Réussites constatées",t.A+" indicateur(s) noté(s) A (sans erreur) et "+items.reduce((n,e)=>n+e.situations.filter(x=>x.z.pass).length,0)+" situation(s) satisfaisante(s). "+t.B+" écart(s) acceptable(s) B. Les détails figurent dans les grilles.", "good");
+ b.callout("Erreurs et écarts significatifs",t.C+" erreur(s) majeure(s) C ; "+t.D+" erreur(s) grave(s) D ; "+t.failed+" situation(s) non réussie(s). "+t.critical+" erreur(s) théorique(s) critique(s) recensée(s)"+(t.criticalUnknown?" ; données critiques inconnues pour "+t.criticalUnknown+" symbole(s)":"")+".",t.D||t.failed||t.critical?"bad":t.C?"warn":"neutral");
+ const deviations=items.filter(e=>e.s.template&&e.s.completedCount<e.s.referenceMinimum);
+ if(deviations.length)b.callout("Nombre de situations inférieur au minimum de référence",deviations.map(e=>e.name+" : "+e.s.completedCount+"/"+e.s.referenceMinimum).join(" ; ")+". La conformité à ce minimum n'est pas établie. L'avis est celui du formateur au vu des situations réalisées.","warn");
+ const errors=items.flatMap(e=>e.entries.filter(x=>["C","D"].includes(x.mark)).map(x=>({cells:[e.name+" / S"+x.number,x.criterion,x.mark+" - "+marks[x.mark]+(x.note?"\n"+x.note:"")],tone:gradeTone[x.mark],emphasis:2})));
+ b.section("Indicateurs nécessitant une attention particulière");b.table(["Symbole / situation","Indicateur observé","Erreur et observation"],[.20,.48,.32],errors);
+ b.section("Décision du formateur");b.text("Titre(s) demandé(s) par l'entreprise : "+(requestedTitles()||"Non renseigné"),{weight:true});
+ b.text(draft?"Aucune proposition administrative émise.":"Avis favorables : "+(fav.map(get).join(" ; ")||"Aucun"),{weight:true});
+ b.text("Avis défavorables"+(draft?" saisis":"")+" : "+(items.filter(e=>e.g.opinion==="defavorable").map(e=>e.name).join(" ; ")||"Aucun"));
+ b.text("Observations générales du formateur : "+(T.scopeNotes||"Non renseignées"));b.text("Périmètre / restrictions envisagés : "+(T.identity.perimetre||"À préciser par l'employeur"));
+ for(const e of items){if(e.g.observations||e.g.reserve)b.callout(e.name+" - Observations et suites",[e.g.observations,e.g.reserve].filter(Boolean).join("\n"),opinionTone(e))}
+ b.text("Le document PROMEO joint est l'avis après formation. Le titre d'habilitation relève de l'employeur (R. 4544-10 du Code du travail). Version pilote, à valider institutionnellement.",{size:9});
+}
+function reportSymbol(b,e,draft){
+ const {p,name,g,s,r}=e,t=s.template;b.newPage();b.heading("03 / Évaluation par symbole - "+name);
+ b.callout(draft?"Avis saisi (non final)":"Avis du formateur",opinionLabel(p),opinionTone(e));
+ b.section("Théorie");if(r){
+ b.metrics([{value:r.good+"/"+r.total,label:"Bonnes réponses",tone:theoryTone(r)},{value:r.pct+" %",label:"Score obtenu",tone:theoryTone(r)},{value:r.critical===null?"-":String(r.critical),label:"Erreurs critiques",tone:r.critical>0?"bad":r.critical===null?"warn":"neutral"}]);
+ b.text("Résultat : "+theoryLabel(r)+" | Contrôle par le formateur : "+(T.verified?"déclaré effectué":"non confirmé")+". "+ruleText(),{size:9});
+ if(r.themes)b.table(["Thème","Réponses exactes","Réponses incorrectes"],[.54,.23,.23],Object.keys(themes).map(k=>({cells:[themes[k],r.themes[k][0]+"/"+r.themes[k][1],String(r.themes[k][1]-r.themes[k][0])],tone:r.themes[k][0]===r.themes[k][1]?"good":"warn",emphasis:2})));
+ if(e.hasTheoryDetail&&e.theoryErrors.length){b.section("Questions incorrectes / sans réponse");b.table(["Question","Réponse donnée","Réponse attendue"],[.38,.31,.31],e.theoryErrors.map(x=>({cells:[(x.critical?"CRITIQUE - ":"")+x.question,x.given,x.expected],tone:x.critical?"bad":"warn",emphasis:0})))}
+ else if(e.hasTheoryDetail)b.callout("Théorie sans erreur","Toutes les questions de ce parcours ont reçu une réponse exacte.","good");
+ else b.text("PDF externe : les réponses question par question ne sont pas disponibles dans les données importées. Se reporter au document d'origine en annexe.",{size:9});
+ }else b.callout("Théorie non renseignée","Aucun résultat disponible pour ce symbole.","neutral");
+ b.section("Pratique");if(!t){b.callout("Grille non fournie","Aucun avis favorable autorisé tant que la grille correspondante n'est pas disponible.","warn");return}
+ b.text("Source : "+t.source+" - grille Word fournie. "+s.completedCount+" situation(s) entièrement évaluée(s), "+s.startedCount+" commencée(s). Minimum indiqué dans la grille : "+t.min+".",{weight:true});
+ if(s.completedCount<t.min)b.callout("Écart au minimum de référence","Nombre inférieur au minimum indiqué dans la grille. L'avis du formateur porte sur les situations réalisées.","warn");
+ b.metrics(["A","B","C","D"].map(k=>({value:String(s.counts[k]),label:k+" - "+marks[k],tone:gradeTone[k]})));
+ b.table(["Situation","A / B / C / D","Bilan"],[.50,.25,.25],e.situations.map(({sit,z,number})=>({cells:[number+". "+(sit.title||"Intitulé non renseigné"),["A","B","C","D"].map(k=>k+" "+z.counts[k]).join("  ")+"\nNon renseignés : "+z.counts.unseen,situationResult(z)],tone:z.failed?"bad":z.pass?"good":"neutral",emphasis:2})));
+ b.section("Objectifs des mises en situation");for(const objective of t.objectives)b.text("- "+objective,{size:9,gap:3});
+ if(p==="BC")b.text("Note : l'objectif et l'indicateur relatifs à la consignation diffèrent dans le document source. Formulations conservées ; à vérifier avec le référent.",{size:9});
+ for(const {sit,z,number} of e.situations){
+ b.newPage();b.heading(name+" / Situation "+number);b.text(sit.title||"Intitulé non renseigné",{weight:true,size:15,gap:8});
+ b.callout(situationResult(z),situationReportText(z),z.failed?"bad":z.pass?"good":"neutral");
+ b.table(["Indicateur de la grille","Note / observation"],[.62,.38],sit.criteria.map((c,j)=>({cells:[(j+1)+". "+c.text,(c.mark?c.mark+" - "+marks[c.mark]:"Non renseigné")+(c.note?"\n"+c.note:"")],tone:gradeTone[c.mark]||"neutral",emphasis:1})));
+ const positives=sit.criteria.filter(c=>c.mark==="A");const errors=sit.criteria.filter(c=>c.mark==="C"||c.mark==="D");
+ if(positives.length)b.callout("Réussites observées (A)",positives.map(c=>"- "+c.text).join("\n"),"good");
+ if(errors.length)b.callout("Erreurs majeures / graves",errors.map(c=>c.mark+" - "+c.text+(c.note?" : "+c.note:"")).join("\n"),errors.some(c=>c.mark==="D")?"bad":"warn");
+ b.text("Observations du formateur : "+(sit.observations||"Non renseignées"));
+ }
+ b.section("Bilan par symbole");b.text(practiceResult(s),{weight:true});b.text("Règle : "+PRACTICE_RULE+" Une situation commencée doit être renseignée pour un avis favorable. Le nombre réalisé est distinct du minimum indiqué dans la grille.",{size:9});b.text("Observations globales : "+(g.observations||"Non renseignées"));b.text("Restrictions / suites : "+(g.reserve||"Non renseignées"));
+ if(draft)for(const issue of decisionReview(p).blockers)b.text("Reste à compléter : "+issue,{size:9});
+}
+
 async function trainerPDF(onlyAvis=false,returnBytes=false,draft=false){
  if(draft&&DEMO)throw Error("Utilisez le test PDF fictif dans ce mode.");
  if(!draft&&!T.file)throw Error("Importez le PDF théorique avant de générer le dossier final.");
@@ -441,29 +591,20 @@ async function trainerPDF(onlyAvis=false,returnBytes=false,draft=false){
  const i=T.identity,ref=T.source?.packet.id||("EXT-"+Date.now().toString(36).toUpperCase());
  const avisDoc=await window.HAB_AVIS.create(draft?controlPayload():avisPayload(trainerSigned),requirePdf(),{preview:draft});
  if(onlyAvis){if(DEMO)await watermarkDemo(avisDoc);if(draft)await watermarkControl(avisDoc);const bytes=await avisDoc.save(),name=(draft?"BROUILLON_CONTROLE_":DEMO?"DEMONSTRATION_":"")+"AVIS_PROMEO_"+safeName(i.nom)+"_"+safeName(i.prenom)+".pdf";if(returnBytes)return {bytes,name};download(bytes,name);return}
- const b=await pdfBuilder(draft?"Dossier de contrôle non signé":"Dossier des évaluations",draft?"BROUILLON - aucune décision administrative":"Annexes théorie et pratique / avis signé",ref);
- b.doc.setTitle("Avis après formation - "+i.nom+" "+i.prenom);b.doc.setAuthor(i.organisme);b.doc.setSubject("Avis après formation préalable à l'habilitation électrique - V5 pilote");
- b.heading("01 / Identification de l'apprenti et de la formation");if(draft)b.text("BROUILLON DE CONTROLE TECHNIQUE. Données saisies à ce stade ; aucune habilitation ni décision finale. Ne pas transmettre à l'employeur.",{weight:true});
- b.text(identityLine(i),{weight:true,size:12});b.text("Entreprise : "+(i.entreprise||"Non renseignée"));b.text("Organisme : "+i.organisme+"  |  Lieu : "+i.lieu);b.text("Stage : "+i.stage+"  |  Type : "+i.type);b.text("Théorie : "+dateFmt(i.dateTheorie)+" - "+i.dureeTheorie+"  |  Pratique : "+dateFmt(i.datePratique)+" - "+i.dureePratique);b.text("Formateur / signataire : "+i.formateur+" - "+i.fonction);b.text("Attributions et périmètre envisagés : "+(i.perimetre||"À préciser par l'employeur"));
- b.heading("02 / Synthèse des résultats et avis par symbole");
- for(const p of T.profiles){const g=gridFor(p),s=gridStatus(p),r=s.r;b.text(get(p)+(draft?"  |  Avis saisi (non final) : ":"  |  Avis : ")+opinionLabel(p),{weight:true,size:11,gap:3});b.text("Théorie : "+(r?r.good+"/"+r.total+" ("+r.pct+" %) / "+theoryLabel(r):"Non renseignée")+"  |  Pratique : "+practiceResult(s)+" ("+s.situations.filter(z=>z.pass).length+"/"+s.startedCount+" situations commencées satisfaisantes)",{size:9,gap:4});if(g.reserve)b.text("Restrictions / suites : "+g.reserve,{size:9,gap:6});if(draft)for(const issue of decisionReview(p).blockers)b.text("Reste à compléter : "+issue,{size:9,gap:3})}
- b.heading("03 / Recommandations et visa");b.text("Titre(s) demandé(s) par l’entreprise : "+requestedTitles(),{weight:true});b.text(draft?"Aucun avis favorable émis dans ce brouillon.":"Symboles faisant l'objet d'un avis favorable : "+(fav.map(get).join(" ; ")||"Aucun"),{weight:true});b.text("Observations globales : "+(T.scopeNotes||"Aucune observation globale renseignée."));b.text("Le titre d'habilitation relève de l'employeur (article R. 4544-10 du Code du travail). Ce document est un avis après formation, et non un titre. Version pilote : validation institutionnelle requise avant usage officiel.",{size:9});b.text(draft?"Aperçu PROMEO non signé en tête du dossier. Signatures volontairement exclues.":"L’avis PROMEO signé est en tête du dossier ; les visas du formateur et de l’apprenti figurent aussi avant l’annexe théorique.",{size:9});
 
- for(const p of T.profiles){
- const g=gridFor(p),s=gridStatus(p),r=s.r,t=s.template;b.newPage();b.heading("04 / Grille pratique - "+get(p));b.text("Source : "+(t?t.source+" - grille Word fournie":"Grille non fournie"),{weight:true});b.text("Théorie : "+(r?r.good+"/"+r.total+" ("+r.pct+" %) / "+theoryLabel(r):"Non renseignée")+" ; contrôle formateur : "+(T.verified?"déclaré effectué":"non confirmé"),{size:9});
- if(t){b.text("Minimum indiqué dans la grille d’origine : "+t.min+" | "+PRACTICE_RULE,{weight:true});b.text("Situations entièrement évaluées : "+s.completedCount+" ; situations commencées : "+s.startedCount+"."+(s.completedCount<t.min?" Nombre inférieur au minimum de la grille. Avis du formateur fondé sur les situations réalisées ; conformité à ce minimum non établie.":""),{weight:true});b.text("A : sans erreur ; B : erreur acceptable ; C : erreur majeure ; D : erreur grave.",{size:9});b.section("Objectifs des mises en situations pratiques");for(const objective of t.objectives)b.text("- "+objective,{size:9,gap:3});
- if(p==="BC")b.text("Note : l'objectif et l'indicateur relatifs à la consignation diffèrent dans le document source. Formulations conservées ; à vérifier avec le référent.",{size:9});
- for(let j=0;j<g.situations.length;j++){const sit=g.situations[j],z=s.situations[j];if(!z.started)continue;b.newPage();b.heading(get(p)+" - Mise en situation n°"+(s.situations.slice(0,j+1).filter(x=>x.started).length));b.text("Intitulé : "+(sit.title||"Non renseigné"),{weight:true});b.text(PRACTICE_RULE,{size:9});for(let k=0;k<sit.criteria.length;k++){const c=sit.criteria[k];b.text((k+1)+". "+c.text,{weight:true,size:10,gap:2});b.text("Notation : "+(marks[c.mark]?c.mark+" - "+marks[c.mark]:"Non renseignée")+(c.note?"  |  "+c.note:""),{size:9,gap:6})}b.text(countText(z.counts),{weight:true});b.text("Bilan de la situation : "+(z.failed?"Critères non satisfaits":z.pass?"Critères satisfaits":"À compléter"),{weight:true});b.text("Observations : "+(sit.observations||"Non renseignées"),{size:9});}
- }else b.text("Aucun avis favorable autorisé tant que la grille correspondant au symbole n'est pas fournie.",{weight:true});
- b.heading("Bilan pratique et avis");b.text(t?"Situations satisfaites : "+s.situations.filter(z=>z.pass).length+"/"+s.startedCount+" ; minimum indiqué dans la grille : "+t.min+" ; bilan : "+practiceResult(s):"Grille non fournie",{weight:true});if(t)b.text("Critères d'acceptation : "+PRACTICE_RULE+" Les situations commencées doivent être renseignées et satisfaisantes pour un avis favorable, qui requiert aussi une théorie positive et contrôlée. Le nombre réalisé reste distinct du minimum indiqué par la grille.",{size:9});b.text("Observations globales : "+(g.observations||"Non renseignées"));b.text((draft?"Avis saisi, non final : ":"Avis du formateur : ")+opinionLabel(p),{weight:true});b.text("Restrictions / suites : "+(g.reserve||"Non renseignées"));
- }
+ const b=await pdfBuilder(draft?"Dossier de contrôle non signé":"Dossier des évaluations",draft?"BROUILLON - aucune décision administrative":"Synthèse, avis PROMEO et preuves d'évaluation",ref);
+ b.doc.setTitle("Avis après formation - "+i.nom+" "+i.prenom);b.doc.setAuthor(i.organisme);b.doc.setSubject("Avis après formation préalable à l'habilitation électrique - V6.1 pilote");
+ const evidence=evaluationEvidence();
+ reportSummary(b,evidence,draft);reportConclusion(b,evidence,draft,fav);
+ const avisInsertIndex=b.doc.getPageCount();
+ for(const e of evidence)reportSymbol(b,e,draft);
 
- b.newPage();b.heading(draft?"05 / Brouillon non signé":"05 / Signatures et validation de l'avis");b.text(identityLine(i),{weight:true,size:12});b.text("Référence du dossier : "+ref);if(draft){b.text("Aucun visa dans le PDF de contrôle. Les données et les résultats affichés sont provisoires. Les signatures éventuellement déjà saisies ne sont pas modifiées ni copiées.",{weight:true})}else{b.text("Avis favorables : "+(fav.map(get).join(" ; ")||"Aucun"));b.text("Le formateur confirme avoir relu le dossier et ses observations. La signature de l'apprenti, si présente, atteste uniquement sa prise de connaissance.",{size:10});await b.signature("Formateur / signataire de l'avis",i.formateur+" - "+i.fonction,trainerSigned);await b.signature("Apprenti / prise de connaissance (facultatif)",i.nom+" "+i.prenom,learnerSigned);b.text("Signatures manuscrites numérisées, sans certificat électronique ni horodatage de confiance. Le titre d'habilitation relève de l'employeur.",{size:9})}
- b.newPage();b.heading("06 / Annexe - évaluation théorique originale");b.text("Fichier joint : "+(T.file?.name||"Aucun PDF importé"),{weight:true});b.text("Nombre de pages annexées : "+(T.file?.pages||0));b.text("Source : "+(T.source?"PDF V5 reconnu, réponses recalculées localement":"PDF externe, résultats reportés manuellement"));b.text("Contrôle des conditions de réalisation par le formateur : "+(T.verified?"confirmé":"non confirmé"));b.text(T.file?"Le PDF importé est reproduit à la suite de cette page. Les métadonnées d'un fichier local ne constituent pas une preuve d'authenticité.":"Aucun résultat théorique original n'est annexé à ce brouillon.",{size:9});b.text("Références de cadrage : INRS ED 6127, sections 5.4 et 7.2 ; Code du travail, article R. 4544-10. Vérifier les référentiels et prescriptions applicables au contexte de formation.",{size:9});
+ b.newPage();b.heading(draft?"04 / Brouillon non signé":"04 / Signatures et validation de l'avis");b.text(identityLine(i),{weight:true,size:12});b.text("Référence du dossier : "+ref);if(draft){b.text("Aucun visa dans le PDF de contrôle. Les données et les résultats affichés sont provisoires. Les signatures éventuellement déjà saisies ne sont pas modifiées ni copiées.",{weight:true})}else{b.text("Avis favorables : "+(fav.map(get).join(" ; ")||"Aucun"));b.text("Le formateur confirme avoir relu le dossier et ses observations. La signature de l'apprenti, si présente, atteste uniquement sa prise de connaissance.",{size:10});await b.signature("Formateur / signataire de l'avis",i.formateur+" - "+i.fonction,trainerSigned);await b.signature("Apprenti / prise de connaissance (facultatif)",i.nom+" "+i.prenom,learnerSigned);b.text("Signatures manuscrites numérisées, sans certificat électronique ni horodatage de confiance. Le titre d'habilitation relève de l'employeur.",{size:9})}
+ b.newPage();b.heading("05 / Annexe - évaluation théorique originale");b.table(["Symbole","Score","Erreurs critiques","Résultat"],[.31,.23,.24,.22],evidence.map(e=>({cells:[e.name,e.r?e.r.good+"/"+e.r.total+" ("+e.r.pct+" %)":"Non renseigné",e.r?String(e.r.critical??"Non renseignées"):"Non renseignées",e.r?theoryLabel(e.r):"Non renseigné"],tone:theoryTone(e.r),emphasis:3})));b.text(ruleText(),{size:9});b.text("Fichier joint : "+(T.file?.name||"Aucun PDF importé"),{weight:true});b.text("Nombre de pages annexées : "+(T.file?.pages||0));b.text("Source : "+(T.source?"PDF V5 reconnu, réponses recalculées localement":"PDF externe, résultats reportés manuellement"));b.text("Contrôle des conditions de réalisation par le formateur : "+(T.verified?"confirmé":"non confirmé"));b.text(T.file?"Le PDF importé est reproduit à la suite de cette page. Les métadonnées d'un fichier local ne constituent pas une preuve d'authenticité.":"Aucun résultat théorique original n'est annexé à ce brouillon.",{size:9});b.text("Références de cadrage : INRS ED 6127, sections 5.4 et 7.2 ; Code du travail, article R. 4544-10. Vérifier les référentiels et prescriptions applicables au contexte de formation.",{size:9});
  const {PDFDocument}=requirePdf();if(T.file){const original=await PDFDocument.load(T.file.bytes),pages=await b.doc.copyPages(original,original.getPageIndices());pages.forEach(p=>b.doc.addPage(p));}
- const avisPages=await b.doc.copyPages(avisDoc,avisDoc.getPageIndices());avisPages.forEach((p,i)=>b.doc.insertPage(i,p));
+ const avisPages=await b.doc.copyPages(avisDoc,avisDoc.getPageIndices());avisPages.forEach((p,i)=>b.doc.insertPage(avisInsertIndex+i,p));
  if(DEMO)await watermarkDemo(b.doc);if(draft)await watermarkControl(b.doc);
- const bytes=await b.doc.save(),name=(draft?"BROUILLON_CONTROLE_":DEMO?"DEMONSTRATION_":"")+"AVIS_HABILITATION_"+safeName(i.nom)+"_"+safeName(i.prenom)+"_"+ref+".pdf";if(returnBytes)return {bytes,name};download(bytes,name);
+ const bytes=await b.doc.save(),name=(draft?"BROUILLON_CONTROLE_":DEMO?"DEMONSTRATION_":"")+"DOSSIER_HABILITATION_"+safeName(i.nom)+"_"+safeName(i.prenom)+"_"+ref+".pdf";if(returnBytes)return {bytes,name};download(bytes,name);
 }
 
 /* V6 : navigation et ergonomie, sans changement des grilles ni des barèmes. */
