@@ -1,3 +1,5 @@
 # BLACKOUT HABILITATION V6
 
 Refonte d'interface autonome. Version V5.3.2 inchangée. Banque et grilles identiques ; transport PDF V5 compatible. Navigation par étapes, un symbole / une situation visible, notes compactes, clavier A/B/C/D, annulation dernière suppression, aperçu PDF non signé, thème sombre/clair. Brouillon local facultatif (IndexedDB, un dossier, non chiffré, aucune signature sauvegardée). Le formateur doit utiliser un poste autorisé. Les exports restent soumis aux validations existantes. Version pilote à vérifier avant usage certificatif.
+
+V6.0.2 : une décision défavorable est clôturée si les éléments nécessaires sont présents, sans être assimilée à une réussite. Les commentaires ne réinitialisent plus l’avis. En cas d’échec pratique constaté dans une situation identifiée, une clôture défavorable peut être enregistrée avant achèvement ; les éléments non observés restent identifiés. Les motifs objectifs sont repris dans le PDF. La liste des tâches et les exports utilisent le même contrôle. Un avis défavorable sans échec objectif nécessite une justification.
